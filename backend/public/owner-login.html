@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owner Login - Neuro.Pilot.AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            background: #111827; 
+            color: white; 
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: #1f2937;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 28rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            color: #60a5fa;
+        }
+        h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .space-y-4 > * + * {
+            margin-top: 1rem;
+        }
+        input {
+            width: 100%;
+            padding: 0.5rem 1rem;
+            background: #374151;
+            border: 1px solid #374151;
+            border-radius: 0.25rem;
+            color: white;
+            outline: none;
+        }
+        input:focus {
+            border-color: #2563eb;
+        }
+        button {
+            width: 100%;
+            padding: 0.5rem;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-weight: 500;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        button:disabled {
+            background: #4b5563;
+            cursor: not-allowed;
+        }
+        .message {
+            margin-top: 1rem;
+            text-align: center;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+        }
+        .message.success {
+            color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
+        }
+        .message.error {
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
+        }
+        .text-center {
+            text-align: center;
+        }
+        .text-sm {
+            font-size: 0.875rem;
+        }
+        .text-gray-400 {
+            color: #9ca3af;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Owner Console Login</h2>
+        
+        <div id="loginForm" class="space-y-4">
+            <h3>Login</h3>
+            <input type="email" id="loginEmail" placeholder="Email" autocomplete="email">
+            <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+            <button onclick="login()" id="loginButton">Login</button>
+            <div id="message" class="message" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Generate or retrieve device ID
+        function getDeviceId() {
+            let deviceId = localStorage.getItem('ownerDeviceId');
+            if (!deviceId) {
+                // Generate a unique device ID
+                deviceId = 'web-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('ownerDeviceId', deviceId);
+            }
+            return deviceId;
+        }
+
+        function showMessage(msg, isError = false) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = msg;
+            messageEl.className = `message ${isError ? 'error' : 'success'}`;
+            messageEl.style.display = 'block';
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 5000);
+        }
+
+        async function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const loginButton = document.getElementById('loginButton');
+
+            if (!email || !password) {
+                showMessage('Please enter both email and password', true);
+                return;
+            }
+
+            loginButton.disabled = true;
+            loginButton.textContent = 'Logging in...';
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    // Store token and device ID
+                    localStorage.setItem('ownerToken', result.token);
+                    localStorage.setItem('ownerUser', JSON.stringify(result.user));
+                    
+                    // Ensure device ID is set and stored
+                    const deviceId = getDeviceId();
+                    localStorage.setItem('ownerDeviceId', deviceId);
+                    
+                    console.log('Login successful! Token stored:', result.token ? 'Yes' : 'No');
+                    console.log('Device ID stored:', deviceId);
+                    
+                    showMessage('Login successful! Redirecting...', false);
+                    
+                    // Redirect to owner console
+                    setTimeout(() => {
+                        window.location.href = '/owner-super-console.html';
+                    }, 1000);
+                } else {
+                    showMessage(result.error || 'Login failed', true);
+                    loginButton.disabled = false;
+                    loginButton.textContent = 'Login';
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error.message, true);
+                loginButton.disabled = false;
+                loginButton.textContent = 'Login';
+            }
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('loginPassword').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+
+        // Check if already logged in
+        const existingToken = localStorage.getItem('ownerToken');
+        if (existingToken) {
+            window.location.href = '/owner-super-console.html';
+        }
+    </script>
+</body>
+</html>
+

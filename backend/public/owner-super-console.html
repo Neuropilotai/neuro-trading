@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owner Super Console - Neuro.Pilot.AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #111827;
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #374151;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #60a5fa;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .user-info span {
+            color: #9ca3af;
+        }
+        button {
+            padding: 8px 16px;
+            background: #dc2626;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #b91c1c;
+        }
+        .btn-primary {
+            background: #2563eb;
+        }
+        .btn-primary:hover {
+            background: #1d4ed8;
+        }
+        .card {
+            background: #1f2937;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #60a5fa;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #1f2937;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+        .stat-card h3 {
+            font-size: 0.875rem;
+            color: #9ca3af;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+        .stat-card .label {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+        .error {
+            background: rgba(248, 113, 113, 0.1);
+            color: #f87171;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #374151;
+        }
+        th {
+            background: #374151;
+            color: #60a5fa;
+            font-weight: 600;
+        }
+        tr:hover {
+            background: #374151;
+        }
+        .refresh-btn {
+            background: #16a34a;
+            margin-bottom: 15px;
+        }
+        .refresh-btn:hover {
+            background: #15803d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Owner Super Console</h1>
+            <div class="user-info">
+                <span id="userEmail"></span>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </header>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <h3>Total Revenue</h3>
+                <div class="value" id="totalRevenue">$0</div>
+                <div class="label">All time</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Expenses</h3>
+                <div class="value" id="totalExpenses">$0</div>
+                <div class="label">All time</div>
+            </div>
+            <div class="stat-card">
+                <h3>Net Profit</h3>
+                <div class="value" id="netProfit">$0</div>
+                <div class="label">All time</div>
+            </div>
+            <div class="stat-card">
+                <h3>Period</h3>
+                <div class="value" id="period">-</div>
+                <div class="label">Report period</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2>Finance Report</h2>
+                <button class="refresh-btn btn-primary" onclick="loadFinanceReport()">Refresh</button>
+            </div>
+            <div id="financeContent">
+                <div class="loading">Loading finance data...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Authentication and API utilities
+        function getAuthToken() {
+            return localStorage.getItem('ownerToken');
+        }
+
+        function getDeviceId() {
+            let deviceId = localStorage.getItem('ownerDeviceId');
+            if (!deviceId) {
+                deviceId = 'web-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('ownerDeviceId', deviceId);
+            }
+            return deviceId;
+        }
+
+        function getOwnerUser() {
+            const userStr = localStorage.getItem('ownerUser');
+            return userStr ? JSON.parse(userStr) : null;
+        }
+
+        // API call function with automatic header attachment
+        async function apiCall(url, options = {}) {
+            const token = getAuthToken();
+            const deviceId = getDeviceId();
+
+            if (!token) {
+                console.error('No authentication token found');
+                window.location.href = '/owner-login.html';
+                return Promise.reject('No authentication token');
+            }
+
+            if (!deviceId) {
+                console.error('No device ID found');
+                // Generate device ID if missing
+                const newDeviceId = 'web-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('ownerDeviceId', newDeviceId);
+            }
+
+            const headers = {
+                'Authorization': `Bearer ${token}`,
+                'X-Owner-Device': deviceId || localStorage.getItem('ownerDeviceId'),
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            console.log('Making API call to:', url);
+            console.log('Headers:', {
+                'Authorization': headers['Authorization'] ? 'Bearer [token]' : 'missing',
+                'X-Owner-Device': headers['X-Owner-Device'] || 'missing'
+            });
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers
+                });
+
+                console.log('API response status:', response.status);
+
+                if (response.status === 401) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('401 Unauthorized:', errorData);
+                    // Token expired or invalid
+                    localStorage.removeItem('ownerToken');
+                    localStorage.removeItem('ownerUser');
+                    showError('Session expired. Please login again.');
+                    setTimeout(() => {
+                        window.location.href = '/owner-login.html';
+                    }, 2000);
+                    return Promise.reject('Authentication failed');
+                }
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: 'Request failed' }));
+                    console.error('API error:', error);
+                    throw new Error(error.error || error.message || `HTTP ${response.status}`);
+                }
+
+                return response;
+            } catch (error) {
+                console.error('API call error:', error);
+                throw error;
+            }
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            setTimeout(() => {
+                errorEl.style.display = 'none';
+            }, 5000);
+        }
+
+        // Check authentication on load
+        function checkAuth() {
+            const token = getAuthToken();
+            const user = getOwnerUser();
+
+            if (!token || !user) {
+                window.location.href = '/owner-login.html';
+                return;
+            }
+
+            document.getElementById('userEmail').textContent = user.email || 'Owner';
+        }
+
+        function logout() {
+            localStorage.removeItem('ownerToken');
+            localStorage.removeItem('ownerUser');
+            window.location.href = '/owner-login.html';
+        }
+
+        // Load finance report
+        async function loadFinanceReport() {
+            const contentEl = document.getElementById('financeContent');
+            contentEl.innerHTML = '<div class="loading">Loading finance data...</div>';
+
+            try {
+                const response = await apiCall('/api/owner/reports/finance');
+                const data = await response.json();
+
+                if (data.success) {
+                    const report = data.report;
+                    
+                    // Update stats
+                    document.getElementById('totalRevenue').textContent = 
+                        formatCurrency(report.totalRevenue || 0);
+                    document.getElementById('totalExpenses').textContent = 
+                        formatCurrency(report.totalExpenses || 0);
+                    document.getElementById('netProfit').textContent = 
+                        formatCurrency(report.netProfit || 0);
+                    document.getElementById('period').textContent = 
+                        report.period || 'N/A';
+
+                    // Display detailed report
+                    let html = '<table>';
+                    html += '<thead><tr><th>Category</th><th>Amount</th><th>Percentage</th></tr></thead>';
+                    html += '<tbody>';
+
+                    if (report.breakdown && report.breakdown.length > 0) {
+                        report.breakdown.forEach(item => {
+                            const percentage = report.totalRevenue > 0 
+                                ? ((item.amount / report.totalRevenue) * 100).toFixed(1)
+                                : '0.0';
+                            html += `<tr>
+                                <td>${item.category}</td>
+                                <td>${formatCurrency(item.amount)}</td>
+                                <td>${percentage}%</td>
+                            </tr>`;
+                        });
+                    } else {
+                        html += '<tr><td colspan="3" style="text-align: center; color: #9ca3af;">No breakdown data available</td></tr>';
+                    }
+
+                    html += '</tbody></table>';
+                    contentEl.innerHTML = html;
+                } else {
+                    contentEl.innerHTML = `<div class="error">${data.error || 'Failed to load finance report'}</div>`;
+                }
+            } catch (error) {
+                contentEl.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                showError('Failed to load finance report: ' + error.message);
+            }
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2
+            }).format(amount);
+        }
+
+        // Test authentication on load
+        async function testAuth() {
+            try {
+                const response = await apiCall('/api/owner/test');
+                const data = await response.json();
+                console.log('Auth test successful:', data);
+            } catch (error) {
+                console.error('Auth test failed:', error);
+            }
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+            // Test auth first, then load finance report
+            testAuth().then(() => {
+                loadFinanceReport();
+            }).catch(() => {
+                // If test fails, still try to load finance report
+                loadFinanceReport();
+            });
+        });
+    </script>
+</body>
+</html>
+

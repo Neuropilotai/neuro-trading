@@ -15,6 +15,105 @@ const IntegrationHub = require('./lib/IntegrationHub');
 
 const app = express();
 
+// CRITICAL: Define HTML routes FIRST, before ANY middleware
+// This ensures Railway/proxy doesn't intercept these requests
+// Use app.all to catch all HTTP methods (though GET is expected)
+app.all('/owner-super-console.html', (req, res) => {
+  console.log('[ROUTE] Serving owner-super-console.html (early route) - Method:', req.method);
+  const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(filePath);
+  } else {
+    console.error('[ROUTE] owner-super-console.html not found at:', filePath);
+    return res.status(404).send('File not found');
+  }
+});
+
+app.all('/owner-super-console-v15.html', (req, res) => {
+  console.log('[ROUTE] ====== Serving owner-super-console-v15.html (early route) ======');
+  console.log('[ROUTE] Method:', req.method);
+  console.log('[ROUTE] Path:', req.path);
+  console.log('[ROUTE] Original URL:', req.originalUrl);
+  const filePath = path.join(__dirname, 'public', 'owner-super-console-v15.html');
+  console.log('[ROUTE] File path:', filePath);
+  console.log('[ROUTE] File exists:', fs.existsSync(filePath));
+  
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    console.log('[ROUTE] Sending file...');
+    return res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error('[ROUTE] Error sending file:', err);
+        return res.status(500).send('Error loading page');
+      }
+      console.log('[ROUTE] File sent successfully');
+    });
+  } else {
+    console.error('[ROUTE] owner-super-console-v15.html not found at:', filePath);
+    return res.status(404).send('File not found');
+  }
+});
+
+app.all('/owner-login.html', (req, res) => {
+  console.log('[ROUTE] Serving owner-login.html (early route) - Method:', req.method);
+  const filePath = path.join(__dirname, 'public', 'owner-login.html');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).send('File not found');
+  }
+});
+
+app.all('/login.html', (req, res) => {
+  console.log('[ROUTE] Serving login.html (early route) - Method:', req.method);
+  const filePath = path.join(__dirname, 'public', 'login.html');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).send('File not found');
+  }
+});
+
+app.all('/quick_login.html', (req, res) => {
+  console.log('[ROUTE] Serving quick_login.html (early route) - Method:', req.method);
+  const filePath = path.join(__dirname, 'public', 'quick_login.html');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).send('File not found');
+  }
+});
+
+// CRITICAL: HTML file bypass middleware - must be immediately after routes, before ANY other middleware
+// This ensures HTML files are served without any authentication checks
+app.use((req, res, next) => {
+  // If it's an HTML file request, serve it directly
+  if (req.path.endsWith('.html') && req.method === 'GET') {
+    const filePath = path.join(__dirname, 'public', req.path);
+    if (fs.existsSync(filePath)) {
+      console.log('[HTML-BYPASS] Serving HTML file without auth:', req.path);
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return res.sendFile(filePath, (err) => {
+        if (err) {
+          console.error('[HTML-BYPASS] Error serving file:', err);
+          return next();
+        }
+      });
+    }
+  }
+  next();
+});
+
 // Configure multer for PDF uploads
 const storage = multer.diskStorage({
   destination: function (_req, _file, cb) {
@@ -50,11 +149,31 @@ const caseInventoryRouter = require('./routes/case-inventory-api');
 // Physical Count API Routes
 const physicalCountRouter = require('./routes/physical-count-api');
 
+// Owner Routes
+const ownerRouter = require('./routes/owner');
+const { authenticateOwner } = require('./middleware/ownerAuth');
+
 app.use(helmet({
   contentSecurityPolicy: false
 }));
 app.use(cors());
 app.use(express.json());
+
+// Request logging middleware to debug Railway issues
+app.use((req, res, next) => {
+  // Log all requests for debugging
+  if (req.path.includes('owner') || req.path.includes('login')) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - Headers:`, {
+      'user-agent': req.headers['user-agent'],
+      'accept': req.headers['accept'],
+      'authorization': req.headers['authorization'] ? 'present' : 'missing'
+    });
+  }
+  next();
+});
+
+// Note: HTML routes are now defined at the very top of the file (before middleware)
+// This ensures they are matched before any other middleware can intercept them
 
 // Mount case inventory routes
 app.use('/api/case-inventory', caseInventoryRouter);
@@ -62,8 +181,65 @@ app.use('/api/case-inventory', caseInventoryRouter);
 // Mount physical count routes
 app.use('/api/physical-count', physicalCountRouter);
 
-// Serve static files from public directory
-app.use(express.static('public'));
+// Define public paths that should bypass authentication
+const PUBLIC_PATHS = [
+  '/owner-super-console.html',
+  '/owner-super-console-v15.html', // Support versioned owner console
+  '/owner-login.html',
+  '/login.html',
+  '/quick_login.html',
+  '/favicon.ico',
+  '/health',
+  '/api/system/health',
+  '/api/auth/login'
+];
+
+// Middleware to check if path should be public
+const isPublicPath = (path) => {
+  // Check exact matches
+  if (PUBLIC_PATHS.includes(path)) return true;
+  
+  // Check if it's a static asset (CSS, JS, images, etc.)
+  if (path.startsWith('/css/') || 
+      path.startsWith('/js/') || 
+      path.startsWith('/assets/') ||
+      path.startsWith('/locales/') ||
+      /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i.test(path)) {
+    return true;
+  }
+  
+  // Check if it's an HTML file (but not owner API routes)
+  if (path.endsWith('.html') && !path.startsWith('/api/owner')) {
+    return true;
+  }
+  
+  return false;
+};
+
+// Serve static files from public directory FIRST - before any auth middleware
+// This ensures HTML files are served without authentication
+// Add a catch-all for HTML files to ensure they're always served
+app.use((req, res, next) => {
+  // If it's an HTML file request and hasn't been handled yet, serve it
+  if (req.path.endsWith('.html') && req.method === 'GET') {
+    const filePath = path.join(__dirname, 'public', req.path);
+    if (fs.existsSync(filePath)) {
+      console.log('[STATIC] Serving HTML file:', req.path);
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return res.sendFile(filePath);
+    }
+  }
+  next();
+});
+
+app.use(express.static('public', {
+  // Don't send 404 for missing files, let it fall through to other routes
+  fallthrough: true
+}));
+
+// Mount owner routes with authentication (after static files, before other routes)
+app.use('/api/owner', authenticateOwner, ownerRouter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', app: 'inventory-enterprise-secure' });
@@ -79,7 +255,7 @@ app.get('/api/system/health', (_req, res) => {
 });
 
 // Authentication endpoint
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
   // Simple authentication check against environment variables
@@ -87,17 +263,66 @@ app.post('/api/auth/login', (req, res) => {
   const adminPassword = process.env.ADMIN_PASSWORD;
 
   if (email === adminEmail && password === adminPassword) {
-    res.json({
-      success: true,
-      message: 'Authentication successful',
-      token: 'demo-token-' + Date.now(),
-      user: {
-        email: email,
-        role: 'Admin',
-        permissions: ['Full Access', 'System Management', 'Data Analysis', 'User Control', 'Security Settings'],
-        sessionTimeout: 1800000
+    // Generate proper JWT token for owner authentication
+    const { generateToken } = require('./middleware/auth');
+    
+    try {
+      // Initialize database if needed
+      const { initDatabase, SessionModel } = require('./db/database');
+      const db = require('./db/database').getDb();
+      
+      // Initialize database if not already initialized
+      if (!db) {
+        await initDatabase();
       }
-    });
+      
+      // Create a temporary user ID for admin (or use existing user lookup)
+      // For owner login, we'll use a special owner user ID
+      const ownerUserId = 1; // Assuming owner has ID 1, or create/lookup owner user
+      
+      const token = generateToken(ownerUserId);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+      
+      // Create session in database
+      await SessionModel.create(ownerUserId, token, expiresAt.toISOString());
+      
+      res.json({
+        success: true,
+        message: 'Authentication successful',
+        token: token,
+        user: {
+          id: ownerUserId,
+          email: email,
+          role: 'owner',
+          firstName: 'Owner',
+          lastName: 'User',
+          permissions: ['Full Access', 'System Management', 'Data Analysis', 'User Control', 'Security Settings'],
+          sessionTimeout: 1800000
+        }
+      });
+    } catch (error) {
+      console.error('Login session creation error:', error);
+      // Even if database fails, generate a valid JWT token
+      // This allows the system to work even without database initialization
+      const ownerUserId = 1;
+      const token = generateToken(ownerUserId);
+      
+      res.json({
+        success: true,
+        message: 'Authentication successful (database session not created)',
+        token: token,
+        user: {
+          id: ownerUserId,
+          email: email,
+          role: 'owner',
+          firstName: 'Owner',
+          lastName: 'User',
+          permissions: ['Full Access', 'System Management', 'Data Analysis', 'User Control', 'Security Settings'],
+          sessionTimeout: 1800000
+        }
+      });
+    }
   } else {
     res.status(401).json({
       success: false,
@@ -1812,6 +2037,43 @@ app.post('/api/counting-sheet/update-item', (req, res) => {
       });
     }
   });
+});
+
+// 404 handler for missing static files (must be last, after all routes)
+app.use((req, res) => {
+  // If it's an HTML file request, return 404 (not 401)
+  if (req.path.endsWith('.html')) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>404 - File Not Found</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #111827; color: white; 
+                 display: flex; align-items: center; justify-content: center; 
+                 min-height: 100vh; margin: 0; }
+          .container { text-align: center; }
+          h1 { color: #60a5fa; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>404 - File Not Found</h1>
+          <p>The file ${req.path} does not exist.</p>
+          <p><a href="/owner-login.html" style="color: #60a5fa;">Go to Owner Login</a></p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+  
+  // For API routes, return JSON 404
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Not Found', message: `Route ${req.path} not found` });
+  }
+  
+  // Default 404
+  res.status(404).json({ error: 'Not Found', message: `Resource ${req.path} not found` });
 });
 
 const PORT = process.env.PORT || 3001;
