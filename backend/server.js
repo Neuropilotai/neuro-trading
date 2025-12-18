@@ -15,46 +15,50 @@ const IntegrationHub = require('./lib/IntegrationHub');
 
 const app = express();
 
+// CRITICAL: Add middleware to explicitly allow HTML files BEFORE any other processing
+// This must be the very first middleware to prevent Railway Edge from intercepting
+app.use((req, res, next) => {
+  // Explicitly allow all HTML files - serve them immediately
+  if (req.path.endsWith('.html') && req.method === 'GET') {
+    const filePath = path.join(__dirname, 'public', req.path);
+    if (fs.existsSync(filePath)) {
+      console.log('[FIRST-MIDDLEWARE] Serving HTML file:', req.path);
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.sendFile(filePath, (err) => {
+        if (err) {
+          console.error('[FIRST-MIDDLEWARE] Error:', err);
+          return next();
+        }
+      });
+    }
+  }
+  next();
+});
+
 // CRITICAL: Define HTML routes FIRST, before ANY middleware
 // This ensures Railway/proxy doesn't intercept these requests
 // Use app.all to catch all HTTP methods (though GET is expected)
+// Use a more aggressive approach - respond immediately without any checks
 app.all('/owner-super-console.html', (req, res) => {
-  console.log('[ROUTE] Serving owner-super-console.html (early route) - Method:', req.method);
+  // Immediately set headers and send file - no logging that could delay
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
-  if (fs.existsSync(filePath)) {
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.sendFile(filePath);
-  } else {
-    console.error('[ROUTE] owner-super-console.html not found at:', filePath);
-    return res.status(404).send('File not found');
-  }
+  return res.sendFile(filePath);
 });
 
 app.all('/owner-super-console-v15.html', (req, res) => {
-  console.log('[ROUTE] ====== Serving owner-super-console-v15.html (early route) ======');
-  console.log('[ROUTE] Method:', req.method);
-  console.log('[ROUTE] Path:', req.path);
-  console.log('[ROUTE] Original URL:', req.originalUrl);
+  // Immediately set headers and send file - no logging that could delay
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const filePath = path.join(__dirname, 'public', 'owner-super-console-v15.html');
-  console.log('[ROUTE] File path:', filePath);
-  console.log('[ROUTE] File exists:', fs.existsSync(filePath));
-  
-  if (fs.existsSync(filePath)) {
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    console.log('[ROUTE] Sending file...');
-    return res.sendFile(filePath, (err) => {
-      if (err) {
-        console.error('[ROUTE] Error sending file:', err);
-        return res.status(500).send('Error loading page');
-      }
-      console.log('[ROUTE] File sent successfully');
-    });
-  } else {
-    console.error('[ROUTE] owner-super-console-v15.html not found at:', filePath);
-    return res.status(404).send('File not found');
-  }
+  return res.sendFile(filePath);
 });
 
 app.all('/owner-login.html', (req, res) => {
