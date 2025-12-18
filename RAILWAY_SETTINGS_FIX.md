@@ -17,15 +17,22 @@
 3. Change from `inventory-enterprise/backend` to `backend`
 4. Click "Update"
 
-### 2. Watch Paths
+### 2. Watch Paths (CRITICAL FIX)
 **Current**: `**/*`  
-**Change to**: Remove the pattern entirely OR change to `backend/**/*`
+**Problem**: Watch patterns are evaluated from repo root, but Root Directory is `inventory-enterprise/backend`. Changes to repo root files don't match.
+
+**Solution**: Add multiple patterns to catch all changes:
 
 **Steps**:
 1. In Railway Dashboard → Settings → Build
 2. Find "Watch Paths" section
-3. Click the "X" next to `**/*` to remove it
-4. OR change it to: `backend/**/*`
+3. Click "Add pattern" and add these patterns (one at a time):
+   - `railway.toml`
+   - `railway.json`
+   - `nixpacks.toml`
+   - `inventory-enterprise/backend/**/*`
+   - `backend/**/*` (if you're using this directory)
+4. OR (Simpler): Remove the `**/*` pattern entirely - this will deploy on ALL file changes
 5. Click "Update"
 
 ### 3. Start Command
