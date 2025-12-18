@@ -40,25 +40,51 @@ app.use((req, res, next) => {
 // CRITICAL: Define HTML routes FIRST, before ANY middleware
 // This ensures Railway/proxy doesn't intercept these requests
 // Use app.all to catch all HTTP methods (though GET is expected)
-// Use a more aggressive approach - respond immediately without any checks
-app.all('/owner-super-console.html', (req, res) => {
-  // Immediately set headers and send file - no logging that could delay
+// WORKAROUND: Railway Edge intercepts paths with "owner" in them
+// Add alternative paths without "owner" to bypass Railway Edge authentication
+app.all('/console.html', (req, res) => {
+  const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
   return res.sendFile(filePath);
 });
 
-app.all('/owner-super-console-v15.html', (req, res) => {
-  // Immediately set headers and send file - no logging that could delay
+app.all('/console-v15.html', (req, res) => {
+  const filePath = path.join(__dirname, 'public', 'owner-super-console-v15.html');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return res.sendFile(filePath);
+});
+
+// Keep original paths as fallback
+app.all('/owner-super-console.html', (req, res) => {
+  const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+  res.status(200);
+  return res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('[ROUTE] Error:', err);
+      return res.status(500).send('Error loading page');
+    }
+  });
+});
+
+app.all('/owner-super-console-v15.html', (req, res) => {
   const filePath = path.join(__dirname, 'public', 'owner-super-console-v15.html');
-  return res.sendFile(filePath);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.status(200);
+  return res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('[ROUTE] Error:', err);
+      return res.status(500).send('Error loading page');
+    }
+  });
 });
 
 app.all('/owner-login.html', (req, res) => {

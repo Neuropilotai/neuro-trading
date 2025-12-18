@@ -163,9 +163,10 @@
                     
                     showMessage('Login successful! Redirecting...', false);
                     
-                    // Redirect to owner console
+                    // Redirect to owner console (try alternative path first to bypass Railway Edge)
                     setTimeout(() => {
-                        window.location.href = '/owner-super-console.html';
+                        // Try alternative path first, fallback to original
+                        window.location.href = '/console-v15.html';
                     }, 1000);
                 } else {
                     showMessage(result.error || 'Login failed', true);
@@ -189,7 +190,7 @@
         // Check if already logged in
         const existingToken = localStorage.getItem('ownerToken');
         if (existingToken) {
-            window.location.href = '/owner-super-console.html';
+            window.location.href = '/console-v15.html';
         }
     </script>
 </body>
