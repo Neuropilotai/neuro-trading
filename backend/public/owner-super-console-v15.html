@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Owner Super Console - Neuro.Pilot.AI</title>
+    <script>
+        // Client-side redirect fallback: if we're on the old path, redirect to new one
+        if (window.location.pathname.includes('owner-super-console') && !window.location.pathname.includes('console')) {
+            window.location.replace('/console-v15.html');
+        }
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {

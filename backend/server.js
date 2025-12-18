@@ -56,35 +56,16 @@ app.all('/console-v15.html', (req, res) => {
   return res.sendFile(filePath);
 });
 
-// Keep original paths as fallback
+// Redirect old paths to new ones to bypass Railway Edge
+// These redirects happen server-side before Railway Edge can intercept
 app.all('/owner-super-console.html', (req, res) => {
-  const filePath = path.join(__dirname, 'public', 'owner-super-console.html');
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.status(200);
-  return res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('[ROUTE] Error:', err);
-      return res.status(500).send('Error loading page');
-    }
-  });
+  // Immediately redirect to the new path
+  return res.redirect(302, '/console.html');
 });
 
 app.all('/owner-super-console-v15.html', (req, res) => {
-  const filePath = path.join(__dirname, 'public', 'owner-super-console-v15.html');
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.status(200);
-  return res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('[ROUTE] Error:', err);
-      return res.status(500).send('Error loading page');
-    }
-  });
+  // Immediately redirect to the new path
+  return res.redirect(302, '/console-v15.html');
 });
 
 app.all('/owner-login.html', (req, res) => {
