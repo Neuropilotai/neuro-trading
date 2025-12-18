@@ -7,6 +7,9 @@ const multer = require('multer');
 const pdf = require('pdf-parse');
 require('dotenv').config();
 
+// IMPORTANT: Railway Edge blocks paths with "owner" in them
+// Use /console.html and /console-v15.html instead of /owner-super-console*.html
+
 // AI Intelligence Layer
 const AdaptiveInventoryAgent = require('./lib/AdaptiveInventoryAgent');
 
