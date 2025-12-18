@@ -9,6 +9,7 @@ require('dotenv').config();
 
 // IMPORTANT: Railway Edge blocks paths with "owner" in them
 // Use /console.html and /console-v15.html instead of /owner-super-console*.html
+// Railway deployment trigger - updated config files
 
 // AI Intelligence Layer
 const AdaptiveInventoryAgent = require('./lib/AdaptiveInventoryAgent');
