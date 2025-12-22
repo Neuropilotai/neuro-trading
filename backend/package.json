@@ -14,7 +14,9 @@
     "audit": "node financial_audit_analysis.js",
     "reconcile": "node unified_system_totals.js",
     "reset:dry": "node scripts/reset-fresh-start.js --dry-run --verbose",
-    "reset:execute": "node scripts/reset-fresh-start.js --execute --files --verbose"
+    "reset:execute": "node scripts/reset-fresh-start.js --execute --files --verbose",
+    "reset:pg:dry": "node scripts/reset-target.js --dry-run --verbose",
+    "reset:pg:execute": "node scripts/reset-target.js --execute --verbose"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
