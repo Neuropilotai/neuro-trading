@@ -12,7 +12,9 @@
     "inventory": "node enterprise-secure-inventory.js",
     "ai-monitor": "node ai_monitoring_system.js",
     "audit": "node financial_audit_analysis.js",
-    "reconcile": "node unified_system_totals.js"
+    "reconcile": "node unified_system_totals.js",
+    "reset:dry": "node scripts/reset-fresh-start.js --dry-run --verbose",
+    "reset:execute": "node scripts/reset-fresh-start.js --execute --files --verbose"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

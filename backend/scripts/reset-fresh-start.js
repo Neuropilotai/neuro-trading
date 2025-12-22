@@ -55,7 +55,21 @@ const args = process.argv.slice(2);
 const isDryRun = !args.includes('--execute');
 const deleteFiles = args.includes('--files');
 const verbose = args.includes('--verbose') || args.includes('-v');
-const createIfMissing = args.includes('--init');
+
+// Safety gate: require RESET_CONFIRM=YES for execute mode
+const confirmEnv = process.env.RESET_CONFIRM;
+if (!isDryRun && confirmEnv !== 'YES') {
+  console.error('\x1b[31m❌ Refusing to execute. Set RESET_CONFIRM=YES to proceed.\x1b[0m');
+  console.error('   Example: RESET_CONFIRM=YES node scripts/reset-fresh-start.js --execute');
+  process.exit(2);
+}
+
+// Print environment info for safety
+console.log('\x1b[36m── Environment ──\x1b[0m');
+console.log(`DB: ${DB_PATH}`);
+console.log(`NODE_ENV: ${process.env.NODE_ENV || '(not set)'}`);
+console.log(`RAILWAY_ENVIRONMENT: ${process.env.RAILWAY_ENVIRONMENT || '(not set)'}`);
+console.log('');
 
 // Color codes for console output
 const colors = {
