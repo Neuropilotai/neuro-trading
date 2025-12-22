@@ -76,8 +76,15 @@ if (!isDryRun && !isConfirmed) {
   process.exit(2);
 }
 
+// Normalize DATABASE_URL (Railway sometimes has malformed value with prefix)
+let dbUrl = process.env.DATABASE_URL || '';
+if (dbUrl.startsWith('DATABASE_URL=')) {
+  dbUrl = dbUrl.replace(/^DATABASE_URL=/, '');
+  console.log('[INFO] Normalized DATABASE_URL (removed prefix)');
+}
+
 // Check DATABASE_URL
-if (!process.env.DATABASE_URL) {
+if (!dbUrl) {
   console.error('\x1b[31m❌ DATABASE_URL not set. Cannot connect to PostgreSQL.\x1b[0m');
   process.exit(1);
 }
@@ -169,7 +176,7 @@ async function main() {
   }
 
   const client = new Client({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: dbUrl,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   });
 
