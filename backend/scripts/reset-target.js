@@ -34,6 +34,9 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const args = process.argv.slice(2);
 const isDryRun = !args.includes('--execute');
 const verbose = args.includes('--verbose') || args.includes('-v');
+// Support --confirm=RESET as alternative to RESET_CONFIRM env var
+const confirmArg = args.find(a => a.startsWith('--confirm='));
+const confirmValue = confirmArg ? confirmArg.split('=')[1] : null;
 
 // Color codes
 const colors = {
@@ -63,11 +66,13 @@ console.log(`RAILWAY_ENVIRONMENT: ${process.env.RAILWAY_ENVIRONMENT || '(not set
 console.log(`TENANT_ID: ${process.env.TENANT_ID || '(all tenants)'}`);
 console.log('');
 
-// Safety gate: require RESET_CONFIRM=YES for execute mode
+// Safety gate: require RESET_CONFIRM=YES or --confirm=RESET for execute mode
 const confirmEnv = process.env.RESET_CONFIRM;
-if (!isDryRun && confirmEnv !== 'YES') {
-  console.error('\x1b[31m❌ Refusing to execute. Set RESET_CONFIRM=YES to proceed.\x1b[0m');
+const isConfirmed = confirmEnv === 'YES' || confirmValue === 'RESET';
+if (!isDryRun && !isConfirmed) {
+  console.error('\x1b[31m❌ Refusing to execute. Set RESET_CONFIRM=YES or use --confirm=RESET to proceed.\x1b[0m');
   console.error('   Example: RESET_CONFIRM=YES node scripts/reset-target.js --execute');
+  console.error('   Or:      node scripts/reset-target.js --execute --confirm=RESET');
   process.exit(2);
 }
 
@@ -79,12 +84,14 @@ if (!process.env.DATABASE_URL) {
 
 /**
  * Check if a table exists in the database
+ * Uses parameterized query to prevent SQL injection
  */
 async function tableExists(client, tableName) {
   const result = await client.query(
-    `SELECT to_regclass('public.${tableName}') as reg`
+    'SELECT to_regclass($1) as reg',
+    ['public.' + tableName]
   );
-  return result.rows[0].reg !== null;
+  return result?.rows?.[0]?.reg !== null;
 }
 
 /**
@@ -172,15 +179,20 @@ async function main() {
 
     const tenantId = process.env.TENANT_ID || null;
 
-    // Check which tables exist
+    // Check which tables exist (MUST check before ANY SQL references them)
     const processedInvoicesExists = await tableExists(client, 'processed_invoices');
     const inventoryProductsExists = await tableExists(client, 'inventory_products');
     const inventoryCountItemsExists = await tableExists(client, 'inventory_count_items');
     const itemMasterExists = await tableExists(client, 'item_master');
     const ledgerExists = await tableExists(client, 'inventory_ledger');
+    const balancesExists = await tableExists(client, 'inventory_balances');
 
+    // Log warnings for missing tables (not errors - just skip them)
     if (!ledgerExists) {
-      log('[WARN] inventory_ledger missing - skipping ledger cleanup (schema does not use ledger)', 'yellow');
+      log('[WARN] inventory_ledger does not exist – skipping', 'yellow');
+    }
+    if (!balancesExists) {
+      log('[WARN] inventory_balances does not exist – skipping', 'yellow');
     }
 
     // Get counts
@@ -222,7 +234,13 @@ async function main() {
       log(`  Ledger (inventory_ledger): ${ledgerCount} records`, 'blue');
     }
 
-    const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0) + ledgerCount;
+    let balancesCount = 0;
+    if (balancesExists) {
+      balancesCount = await getCount(client, 'inventory_balances', tenantId);
+      log(`  Balances (inventory_balances): ${balancesCount} records`, 'blue');
+    }
+
+    const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0) + ledgerCount + balancesCount;
 
     if (totalRecords === 0) {
       log('\n  No data found to reset.', 'green');
@@ -266,6 +284,9 @@ async function main() {
       if (ledgerExists && ledgerCount > 0) {
         log(`  • inventory_ledger: ${ledgerCount} records`);
       }
+      if (balancesExists && balancesCount > 0) {
+        log(`  • inventory_balances: ${balancesCount} records`);
+      }
 
       log(`\n  Total records: ${totalRecords}`, 'cyan');
       log('\n  To execute, run:', 'green');
@@ -274,9 +295,11 @@ async function main() {
     } else {
       logSection('EXECUTING RESET');
 
-      // Delete in correct order (children first)
+      // Delete in correct order (children first, then parents)
+      // inventory_balances and inventory_ledger are typically child tables
       const deleteOrder = [
         { table: 'inventory_count_items', exists: inventoryCountItemsExists },
+        { table: 'inventory_balances', exists: balancesExists },
         { table: 'inventory_ledger', exists: ledgerExists },
         { table: 'inventory_products', exists: inventoryProductsExists },
         { table: 'item_master', exists: itemMasterExists },
@@ -294,6 +317,8 @@ async function main() {
           } catch (err) {
             log(`  ✗ Error deleting from ${table}: ${err.message}`, 'red');
           }
+        } else {
+          log(`  - Skipped ${table} (table does not exist)`, 'yellow');
         }
       }
 
