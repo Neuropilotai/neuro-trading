@@ -90,18 +90,6 @@ if (!dbUrl) {
 }
 
 /**
- * Check if a table exists in the database
- * Uses parameterized query to prevent SQL injection
- */
-async function tableExists(client, tableName) {
-  const result = await client.query(
-    'SELECT to_regclass($1) as reg',
-    ['public.' + tableName]
-  );
-  return result?.rows?.[0]?.reg !== null;
-}
-
-/**
  * Get count from a table with optional tenant filter
  */
 async function getCount(client, tableName, tenantId = null) {
@@ -186,13 +174,19 @@ async function main() {
 
     const tenantId = process.env.TENANT_ID || null;
 
+    // Helper function to check if table exists (using client as pool-like interface)
+    async function tableExists(tableName) {
+      const r = await client.query('select to_regclass($1) as reg', [`public.${tableName}`]);
+      return r.rows?.[0]?.reg != null;
+    }
+
     // Check which tables exist (MUST check before ANY SQL references them)
-    const processedInvoicesExists = await tableExists(client, 'processed_invoices');
-    const inventoryProductsExists = await tableExists(client, 'inventory_products');
-    const inventoryCountItemsExists = await tableExists(client, 'inventory_count_items');
-    const itemMasterExists = await tableExists(client, 'item_master');
-    const ledgerExists = await tableExists(client, 'inventory_ledger');
-    const balancesExists = await tableExists(client, 'inventory_balances');
+    const processedInvoicesExists = await tableExists('processed_invoices');
+    const inventoryProductsExists = await tableExists('inventory_products');
+    const inventoryCountItemsExists = await tableExists('inventory_count_items');
+    const itemMasterExists = await tableExists('item_master');
+    const ledgerExists = await tableExists('inventory_ledger');
+    const balancesExists = await tableExists('inventory_balances');
 
     // Log warnings for missing tables (not errors - just skip them)
     if (!ledgerExists) {
@@ -236,15 +230,21 @@ async function main() {
     }
 
     let ledgerCount = 0;
-    if (ledgerExists) {
+    if (await tableExists('inventory_ledger')) {
       ledgerCount = await getCount(client, 'inventory_ledger', tenantId);
       log(`  Ledger (inventory_ledger): ${ledgerCount} records`, 'blue');
+    } else {
+      ledgerCount = 0;
+      log(`  [WARN] inventory_ledger does not exist – skipping`, 'yellow');
     }
 
     let balancesCount = 0;
-    if (balancesExists) {
+    if (await tableExists('inventory_balances')) {
       balancesCount = await getCount(client, 'inventory_balances', tenantId);
       log(`  Balances (inventory_balances): ${balancesCount} records`, 'blue');
+    } else {
+      balancesCount = 0;
+      log(`  [WARN] inventory_balances does not exist – skipping`, 'yellow');
     }
 
     const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0) + ledgerCount + balancesCount;
@@ -316,7 +316,12 @@ async function main() {
       let totalDeleted = 0;
 
       for (const { table, exists } of deleteOrder) {
-        if (exists) {
+        // Double-check table exists before delete (especially for optional tables)
+        const tableStillExists = (table === 'inventory_ledger' || table === 'inventory_balances') 
+          ? await tableExists(table) 
+          : exists;
+        
+        if (tableStillExists) {
           try {
             const deleted = await deleteFromTable(client, table, tenantId);
             totalDeleted += deleted;
