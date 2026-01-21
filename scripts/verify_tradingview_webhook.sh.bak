@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+
+# TradingView Webhook Verification Script
+# Tests localhost and ngrok endpoints, authentication, and idempotency
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+LOCAL_URL="http://localhost:3014"
+SECRET="${TRADINGVIEW_WEBHOOK_SECRET:-11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784}"
+PASSED=0
+FAILED=0
+
+echo "🧪 TradingView Webhook Verification"
+echo "===================================="
+echo ""
+echo "Local URL: ${LOCAL_URL}"
+echo "Secret: ${SECRET:0:20}..."
+echo ""
+
+# Helper function to generate HMAC signature
+generate_signature() {
+    local payload="$1"
+    echo -n "$payload" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}' || echo "invalid"
+}
+
+# Test function
+test_endpoint() {
+    local name="$1"
+    local method="$2"
+    local url="$3"
+    local headers="$4"
+    local data="$5"
+    local expected_status="$6"
+    local expected_keyword="$7"  # Optional: keyword to check in response
+    
+    echo -n "Testing: ${name}... "
+    
+    response=$(curl -s --max-time 10 -w "\nHTTP_CODE:%{http_code}" -X "$method" "$url" $headers -d "$data" 2>/dev/null || echo "HTTP_CODE:000")
+    
+    http_code=$(echo "$response" | grep "HTTP_CODE" | cut -d':' -f2 || echo "000")
+    body=$(echo "$response" | sed '/HTTP_CODE/d' || echo "")
+    
+    if [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
+        echo -e "${RED}❌ FAIL${NC} (Connection error)"
+        ((FAILED++))
+        return 1
+    fi
+    
+    if [ "$http_code" = "$expected_status" ]; then
+        # Check for keyword if provided
+        if [ -n "$expected_keyword" ]; then
+            if echo "$body" | grep -q "$expected_keyword"; then
+                echo -e "${GREEN}✅ PASS${NC} (Status: $http_code)"
+                ((PASSED++))
+                return 0
+            else
+                echo -e "${YELLOW}⚠️  PARTIAL${NC} (Status: $http_code, but missing keyword: $expected_keyword)"
+                ((FAILED++))
+                return 1
+            fi
+        else
+            echo -e "${GREEN}✅ PASS${NC} (Status: $http_code)"
+            ((PASSED++))
+            return 0
+        fi
+    else
+        echo -e "${RED}❌ FAIL${NC} (Expected: $expected_status, Got: $http_code)"
+        if [ -n "$body" ]; then
+            echo "   Response: $(echo "$body" | head -c 100)"
+        fi
+        ((FAILED++))
+        return 1
+    fi
+}
+
+# Test 1: Health Check
+echo "1️⃣  Health Check"
+test_endpoint "Health Check" "GET" "${LOCAL_URL}/health" "" "" "200" "healthy"
+echo ""
+
+# Test 2: Invalid Signature (should return 401)
+echo "2️⃣  Authentication Tests"
+PAYLOAD='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-auth-1","timestamp":1234567890}'
+test_endpoint "Invalid Signature" "POST" "${LOCAL_URL}/webhook/tradingview" \
+    "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=invalid'" \
+    "$PAYLOAD" "401"
+echo ""
+
+# Test 3: Missing Signature (should return 401)
+test_endpoint "Missing Signature" "POST" "${LOCAL_URL}/webhook/tradingview" \
+    "-H 'Content-Type: application/json'" \
+    "$PAYLOAD" "401"
+echo ""
+
+# Test 4: Valid Signature (should return 200)
+echo "3️⃣  Valid Request Tests"
+PAYLOAD_VALID='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-valid-'$(date +%s)'","timestamp":'$(date +%s)'}'
+SIG=$(generate_signature "$PAYLOAD_VALID")
+
+if [ "$SIG" != "invalid" ] && [ -n "$SIG" ]; then
+    test_endpoint "Valid Signature" "POST" "${LOCAL_URL}/webhook/tradingview" \
+        "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=$SIG'" \
+        "$PAYLOAD_VALID" "200" "success"
+else
+    echo -e "${YELLOW}⚠️  SKIP${NC} (openssl not available for signature generation)"
+    ((FAILED++))
+fi
+echo ""
+
+# Test 5: Missing Required Fields (should return 400)
+echo "4️⃣  Validation Tests"
+INVALID_PAYLOAD='{"symbol":"BTCUSDT","action":"BUY"}'
+test_endpoint "Missing Required Fields" "POST" "${LOCAL_URL}/webhook/tradingview" \
+    "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=test'" \
+    "$INVALID_PAYLOAD" "400"
+echo ""
+
+# Test 6: Idempotency (same alert_id twice)
+echo "5️⃣  Idempotency Tests"
+ALERT_ID="test-idempotency-$(date +%s)"
+TIMESTAMP=$(date +%s)
+PAYLOAD_DEDUPE1='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"'$ALERT_ID'","timestamp":'$TIMESTAMP'}'
+PAYLOAD_DEDUPE2='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"'$ALERT_ID'","timestamp":'$TIMESTAMP'}'
+
+SIG1=$(generate_signature "$PAYLOAD_DEDUPE1")
+SIG2=$(generate_signature "$PAYLOAD_DEDUPE2")
+
+if [ "$SIG1" != "invalid" ] && [ -n "$SIG1" ]; then
+    # First request should succeed
+    test_endpoint "First Request (should pass)" "POST" "${LOCAL_URL}/webhook/tradingview" \
+        "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=$SIG1'" \
+        "$PAYLOAD_DEDUPE1" "200" "success"
+    
+    # Duplicate should fail with 409
+    test_endpoint "Duplicate Request (should return 409)" "POST" "${LOCAL_URL}/webhook/tradingview" \
+        "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=$SIG2'" \
+        "$PAYLOAD_DEDUPE2" "409" "Duplicate"
+else
+    echo -e "${YELLOW}⚠️  SKIP${NC} (openssl not available)"
+    ((FAILED++))
+fi
+echo ""
+
+# Test 7: ngrok Public URL (if running)
+echo "6️⃣  ngrok Public URL Test"
+NGROK_API_RESPONSE=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null || echo "")
+
+if [ -n "$NGROK_API_RESPONSE" ]; then
+    PUBLIC_URL=$(echo "$NGROK_API_RESPONSE" | grep -o '"public_url":"https://[^"]*"' | head -1 | sed 's/"public_url":"\(.*\)"/\1/' || echo "")
+    
+    if [ -n "$PUBLIC_URL" ]; then
+        WEBHOOK_URL="${PUBLIC_URL}/webhook/tradingview"
+        echo "   Found ngrok URL: ${PUBLIC_URL}"
+        echo ""
+        
+        PAYLOAD_NGROK='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-ngrok-'$(date +%s)'","timestamp":'$(date +%s)'}'
+        SIG_NGROK=$(generate_signature "$PAYLOAD_NGROK")
+        
+        if [ "$SIG_NGROK" != "invalid" ] && [ -n "$SIG_NGROK" ]; then
+            test_endpoint "ngrok Public URL" "POST" "$WEBHOOK_URL" \
+                "-H 'Content-Type: application/json' -H 'X-TradingView-Signature: sha256=$SIG_NGROK'" \
+                "$PAYLOAD_NGROK" "200" "success"
+        else
+            echo -e "${YELLOW}⚠️  SKIP${NC} (openssl not available)"
+        fi
+    else
+        echo -e "${YELLOW}⚠️  SKIP${NC} (ngrok running but could not extract URL)"
+    fi
+else
+    echo -e "${YELLOW}⚠️  SKIP${NC} (ngrok not running - start with: ./setup_ngrok.sh)"
+fi
+echo ""
+
+# Summary
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 Test Summary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+TOTAL=$((PASSED + FAILED))
+if [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}✅ All tests passed!${NC} ($PASSED/$TOTAL)"
+    echo ""
+    exit 0
+else
+    echo -e "${RED}❌ Some tests failed${NC} (Passed: $PASSED, Failed: $FAILED)"
+    echo ""
+    exit 1
+fi
+
+
