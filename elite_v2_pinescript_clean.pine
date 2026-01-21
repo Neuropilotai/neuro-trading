@@ -276,10 +276,40 @@ if barstate.islast
     table.cell(elite_dashboard, 3, 9, str.tostring(position_size) + "%", text_color=color.new(color.yellow, 0), text_size=size.small)
 
 // ===== ELITE WEBHOOK EXPORT ALERTS =====
+// Generate webhook JSON in server-compatible format
+// TradingView template variables {{ticker}}, {{close}}, {{time}} are replaced when alert triggers
+
+// BUY webhook format (matches ALERT_MESSAGE_BUY.txt exactly) - server-compatible format
+// Note: TradingView replaces {{ticker}}, {{close}}, {{time}} when alert triggers
+webhook_json_buy = '{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}}}'
+
+// SELL webhook format (matches ALERT_MESSAGE_SELL.txt exactly) - server-compatible format
+webhook_json_sell = '{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}}}'
+
+// Legacy webhook_json for informational alert conditions (includes AI metrics)
 webhook_json = '{"score":' + str.tostring(ai_score, "#.#") + ',"confidence":' + str.tostring(nn_confidence_adjusted, "#.##") + ',"mode":"' + riskMode + '","sharpe":' + str.tostring(sharpe_approx, "#.##") + ',"signal":"' + (super_long_signal ? "LONG" : super_short_signal ? "SHORT" : "NONE") + '","regime":"' + current_regime + '","accuracy":' + str.tostring(aiAccuracy, "#.###") + ',"timestamp":"{{time}}"}'
 
-alertcondition(super_long_signal, "🎯 Elite AI Long", "ELITE AI LONG! " + webhook_json)
-alertcondition(super_short_signal, "🎯 Elite AI Short", "ELITE AI SHORT! " + webhook_json)
+// ===== MAIN TRADING ALERTS (Webhook Export) =====
+// IMPORTANT: alertcondition() defines the alert condition name and default message text.
+// You must still create alerts in TradingView UI and configure:
+//   1. Webhook URL (from ngrok or production server)
+//   2. Webhook Secret (must match TRADINGVIEW_WEBHOOK_SECRET)
+//   3. Alert Message will auto-populate from the third parameter below
+//   4. Frequency: "Once Per Bar Close"
+//
+// When enableWebhookExport is false, these alertconditions are not defined,
+// preventing accidental webhook calls when webhooks are not configured.
+
+if enableWebhookExport
+    // BUY alert - message auto-populates with webhook_json_buy (matches ALERT_MESSAGE_BUY.txt)
+    alertcondition(super_long_signal, "🎯 Elite AI Long", webhook_json_buy)
+    
+    // SELL alert - message auto-populates with webhook_json_sell (matches ALERT_MESSAGE_SELL.txt)
+    alertcondition(super_short_signal, "🎯 Elite AI Short", webhook_json_sell)
+
+// ===== INFORMATIONAL ALERTS (Optional - for monitoring) =====
+// These alerts provide additional context but are not required for trading execution.
+// They use the legacy webhook_json format with AI metrics.
 alertcondition(ta.cross(nn_confidence_adjusted, 0.85), "🔥 Elite High Confidence", "ELITE HIGH CONFIDENCE! " + webhook_json)
 alertcondition(ai_score > 85, "🎯 Elite Extreme Score", "ELITE EXTREME SCORE! " + webhook_json)
 alertcondition(ta.change(current_regime), "🚦 Regime Change", "REGIME CHANGED TO: " + current_regime + " | " + webhook_json)

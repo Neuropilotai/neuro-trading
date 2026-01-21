@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2026-01-20T00:00:00Z",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "SPY",
+    "QQQ",
+    "AAPL",
+    "TSLA",
+    "NVDA"
+  ],
+  "timeframes": [
+    "1",
+    "5"
+  ],
+  "providerMapping": {
+    "crypto": "binance",
+    "forex": "oanda",
+    "stocks": "local_csv",
+    "default": "binance"
+  },
+  "maxHistoryBars": {
+    "1": 20000,
+    "5": 10000
+  },
+  "learningSchedule": {
+    "intervalMinutes": 1,
+    "dailyBackfillTime": "02:00",
+    "retentionDays": 30,
+    "focus": "scalping",
+    "scalpingConfig": {
+      "minPatternWindow": 5,
+      "maxPatternWindow": 20,
+      "priorityPatterns": [
+        "momentum_burst",
+        "volatility_expansion",
+        "quick_reversal",
+        "support_bounce",
+        "resistance_rejection"
+      ]
+    }
+  },
+  "symbolMetadata": {
+    "BTCUSDT": {
+      "assetClass": "crypto",
+      "provider": "binance",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT"
+    },
+    "ETHUSDT": {
+      "assetClass": "crypto",
+      "provider": "binance",
+      "baseCurrency": "ETH",
+      "quoteCurrency": "USDT"
+    },
+    "SOLUSDT": {
+      "assetClass": "crypto",
+      "provider": "binance",
+      "baseCurrency": "SOL",
+      "quoteCurrency": "USDT"
+    },
+    "SPY": {
+      "assetClass": "stocks",
+      "provider": "local_csv",
+      "exchange": "NYSE"
+    },
+    "QQQ": {
+      "assetClass": "stocks",
+      "provider": "local_csv",
+      "exchange": "NASDAQ"
+    },
+    "AAPL": {
+      "assetClass": "stocks",
+      "provider": "local_csv",
+      "exchange": "NASDAQ"
+    },
+    "TSLA": {
+      "assetClass": "stocks",
+      "provider": "local_csv",
+      "exchange": "NASDAQ"
+    },
+    "NVDA": {
+      "assetClass": "stocks",
+      "provider": "local_csv",
+      "exchange": "NASDAQ"
+    }
+  }
+}
+
