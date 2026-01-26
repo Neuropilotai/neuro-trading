@@ -270,44 +270,11 @@ class TradingViewAPIWrapper extends EventEmitter {
   }
 
   // Manual strategy backtest
+  // NOTE: This method is DEPRECATED. Use backend/services/backtestEngine.js instead.
+  // This method is kept for backward compatibility but returns an error.
   async backtestStrategy(pineScriptCode, symbol, timeframe, period = '1M') {
-    try {
-      console.log(`📈 Running backtest for ${symbol} (${timeframe}, ${period})...`);
-      
-      await this.simulateAPICall();
-      
-      // Generate simulated backtest results
-      const backtest = {
-        id: `backtest_${Date.now()}`,
-        symbol,
-        timeframe,
-        period,
-        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        endDate: new Date(),
-        results: {
-          initialCapital: 10000,
-          finalCapital: 10000 + (Math.random() - 0.3) * 3000,
-          totalTrades: Math.floor(Math.random() * 50) + 10,
-          winningTrades: Math.floor(Math.random() * 30) + 15,
-          losingTrades: Math.floor(Math.random() * 20) + 5,
-          maxDrawdown: Math.random() * 0.2,
-          sharpeRatio: 0.5 + Math.random() * 2,
-          profitFactor: 0.8 + Math.random() * 1.5
-        },
-        completedAt: new Date()
-      };
-      
-      backtest.results.winRate = backtest.results.winningTrades / backtest.results.totalTrades;
-      backtest.results.netProfit = backtest.results.finalCapital - backtest.results.initialCapital;
-      
-      console.log(`✅ Backtest completed: ${backtest.results.winRate.toFixed(2)} win rate`);
-      
-      return backtest;
-      
-    } catch (error) {
-      console.error('Backtest error:', error);
-      throw error;
-    }
+    console.warn('⚠️  backtestStrategy() is deprecated. Use backend/services/backtestEngine.js for real backtesting.');
+    throw new Error('Fake backtesting removed. Use cli/backtest.js or backend/services/backtestEngine.js for deterministic backtesting.');
   }
 }
 

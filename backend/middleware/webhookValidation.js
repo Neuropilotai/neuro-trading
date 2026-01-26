@@ -23,9 +23,15 @@ function validateAlertPayload(payload) {
 
   // Validate action (check type before calling toUpperCase)
   if (payload.action !== undefined && payload.action !== null && payload.action !== '') {
-    const actionStr = String(payload.action).toUpperCase();
-    if (!['BUY', 'SELL', 'CLOSE'].includes(actionStr)) {
-      errors.push(`Invalid action: ${payload.action}. Must be BUY, SELL, or CLOSE`);
+    // Explicitly check that action is a string or can be safely converted
+    if (typeof payload.action !== 'string' && typeof payload.action !== 'number') {
+      errors.push(`Invalid action type: ${typeof payload.action}. Action must be a string or number`);
+    } else {
+      // Safely convert to string and uppercase
+      const actionStr = String(payload.action).toUpperCase();
+      if (!['BUY', 'SELL', 'CLOSE'].includes(actionStr)) {
+        errors.push(`Invalid action: ${payload.action}. Must be BUY, SELL, or CLOSE`);
+      }
     }
   }
 

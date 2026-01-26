@@ -17,14 +17,24 @@ function extractOrderIntent(req) {
   // Parse price first before using it in calculations
   const price = parseFloat(body.price);
   
+  // Validate price is a valid positive number
+  if (isNaN(price) || price <= 0) {
+    throw new Error(`Invalid price: ${body.price}. Must be a positive number`);
+  }
+  
   // Calculate quantity if not provided (use 1% of account balance as default)
-  const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '100000');
-  const defaultQuantity = body.quantity || (price > 0 ? Math.floor((accountBalance * 0.01) / price) : 0);
+  // Use same default as paperTradingService to avoid mismatch
+  const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
+  const defaultQuantity = body.quantity || Math.floor((accountBalance * 0.01) / price);
   const action = body.action?.toUpperCase();
   
   // Extract stop_loss and take_profit, or compute defaults
   let stopLoss = body.stop_loss ? parseFloat(body.stop_loss) : body.stopLoss ? parseFloat(body.stopLoss) : null;
   let takeProfit = body.take_profit ? parseFloat(body.take_profit) : body.takeProfit ? parseFloat(body.takeProfit) : null;
+  
+  // Track whether values were provided or computed as defaults (for indicator override)
+  const stopLossWasDefault = !stopLoss || isNaN(stopLoss);
+  const takeProfitWasDefault = !takeProfit || isNaN(takeProfit);
   
   // Compute defaults if missing (server-side safety)
   if (!stopLoss || isNaN(stopLoss)) {
@@ -50,7 +60,10 @@ function extractOrderIntent(req) {
     price: price,
     stopLoss: stopLoss,
     takeProfit: takeProfit,
-    confidence: body.confidence ? parseFloat(body.confidence) : null
+    confidence: body.confidence ? parseFloat(body.confidence) : null,
+    // Flags to indicate if values were defaults (allows indicator override)
+    _stopLossWasDefault: stopLossWasDefault,
+    _takeProfitWasDefault: takeProfitWasDefault
   };
 }
 
@@ -60,7 +73,8 @@ function extractOrderIntent(req) {
 async function riskCheck(req, res, next) {
   try {
     const orderIntent = extractOrderIntent(req);
-    const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '100000');
+    // Use same default as paperTradingService to avoid mismatch
+    const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
     
     const validation = await riskEngine.validateOrder(orderIntent, accountBalance);
 

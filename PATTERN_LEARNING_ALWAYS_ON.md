@@ -190,6 +190,42 @@ GET /learn/status
 ```
 Returns: Daemon status, engine stats, Google Drive sync, errors
 
+**Heartbeat System:**
+The daemon writes a heartbeat file (`data/learning/heartbeat.json`) on startup and after every learning cycle. This ensures accurate status reporting:
+
+- **Location:** `data/learning/heartbeat.json`
+- **Written:** On startup, after each cycle (success or error)
+- **Atomic Write:** Uses temp file then rename to prevent partial reads
+- **Fields:**
+  - `pid` - Process ID
+  - `startedAt` - Daemon start timestamp
+  - `lastCycleAt` - Last cycle completion timestamp
+  - `candlesProcessed` - Candles processed in last cycle
+  - `patternsFound` - Patterns found in last cycle
+  - `patternsTotal` - Total patterns in bank
+  - `storageMode` - GOOGLE_DRIVE_PRIMARY or LOCAL_CACHE
+  - `googleDriveEnabled` - Drive sync status
+  - `errorCount` - Total error count
+  - `lastError` - Last error (if any)
+
+The `/learn/status` endpoint:
+1. Reads heartbeat file for accurate metrics
+2. Checks PID liveness using `process.kill(pid, 0)`
+3. Returns `running=true` when daemon is actually alive
+4. Returns `lastCycleAt` from heartbeat (not null)
+
+**Verification:**
+```bash
+# Check heartbeat file
+cat data/learning/heartbeat.json | jq .
+
+# Verify status accuracy
+./scripts/verify_daemon_status.sh
+
+# Check status endpoint
+curl http://localhost:3014/learn/status | jq .daemon
+```
+
 ### Latest Metrics
 ```bash
 GET /learn/metrics/latest

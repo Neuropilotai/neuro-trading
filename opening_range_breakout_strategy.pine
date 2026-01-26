@@ -1,0 +1,379 @@
+//@version=5
+strategy("Opening Range Breakout - QQC", 
+         overlay=true, 
+         initial_capital=10000, 
+         default_qty_type=strategy.fixed, 
+         default_qty_value=1,
+         process_orders_on_close=true,
+         max_bars_back=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Time Settings
+var string GROUP_TIME = "⏰ Time Settings"
+timezoneInput = input.string("America/New_York", "Timezone", group=GROUP_TIME)
+tradeStartTime = input.time(timestamp("2024-01-01 09:45:00"), "Trading Window Start (09:45)", group=GROUP_TIME)
+tradeEndTime = input.time(timestamp("2024-01-01 11:15:00"), "Trading Window End (11:15)", group=GROUP_TIME)
+orStartTime = input.time(timestamp("2024-01-01 09:30:00"), "OR Start (09:30)", group=GROUP_TIME)
+orEndTime = input.time(timestamp("2024-01-01 09:45:00"), "OR End (09:45)", group=GROUP_TIME)
+
+// Opening Range Filters
+var string GROUP_OR = "📊 Opening Range Filters"
+orWidthMinPct = input.float(0.20, "OR Width Min %", minval=0.01, maxval=5.0, step=0.05, group=GROUP_OR)
+orWidthMaxPct = input.float(0.80, "OR Width Max %", minval=0.01, maxval=5.0, step=0.05, group=GROUP_OR)
+
+// ATR Settings
+var string GROUP_ATR = "📈 ATR Stop Settings"
+atrLength = input.int(14, "ATR Length", minval=1, group=GROUP_ATR)
+atrMult = input.float(1.5, "ATR Multiplier", minval=0.1, maxval=5.0, step=0.1, group=GROUP_ATR)
+
+// Risk Management
+var string GROUP_RISK = "💰 Risk Management"
+riskPerTrade = input.float(2.0, "Risk Per Trade ($)", minval=0.1, step=0.1, group=GROUP_RISK)
+dailyMaxLoss = input.float(8.0, "Daily Max Loss ($)", minval=0.1, step=0.1, group=GROUP_RISK)
+tpMultiple = input.float(1.2, "Take Profit (R)", minval=0.1, step=0.1, group=GROUP_RISK)
+beTriggerR = input.float(0.6, "Break-Even Trigger (R)", minval=0.0, step=0.1, group=GROUP_RISK)
+maxTradesPerDay = input.int(2, "Max Trades Per Day", minval=1, group=GROUP_RISK)
+
+// Commission & Slippage
+// NOTE: These inputs are used for position sizing calculations.
+// To set actual commission/slippage in backtesting, use Strategy Tester settings:
+// - Commission: Set in Strategy Tester → Settings → Commission
+// - Slippage: Set in Strategy Tester → Settings → Slippage
+var string GROUP_COSTS = "💸 Costs (for Position Sizing)"
+commissionPct = input.float(0.1, "Commission % (for sizing)", minval=0.0, step=0.01, group=GROUP_COSTS, tooltip="Used in position sizing calculation. Set actual commission in Strategy Tester settings.")
+slippageTicks = input.int(1, "Slippage (Ticks)", minval=0, group=GROUP_COSTS, tooltip="Used in position sizing calculation. Set actual slippage in Strategy Tester settings.")
+tickSize = input.float(0.01, "Tick Size", minval=0.001, step=0.001, group=GROUP_COSTS)
+
+// ============================================================================
+// TIME LOGIC
+// ============================================================================
+
+// Extract hour and minute from input time
+getHour(timeInput) => hour(timeInput, timezoneInput)
+getMinute(timeInput) => minute(timeInput, timezoneInput)
+getSecond(timeInput) => second(timeInput, timezoneInput)
+
+// Create time in session
+makeTime(h, m, s) => time(h, m, s, timezoneInput)
+
+// Current time components
+currentHour = hour(time, timezoneInput)
+currentMinute = minute(time, timezoneInput)
+currentSecond = second(time, timezoneInput)
+currentTime = time(currentHour, currentMinute, currentSecond, timezoneInput)
+
+// Time windows (extract hour/minute from input times)
+orStartH = getHour(orStartTime)
+orStartM = getMinute(orStartTime)
+orEndH = getHour(orEndTime)
+orEndM = getMinute(orEndTime)
+tradeStartH = getHour(tradeStartTime)
+tradeStartM = getMinute(tradeStartTime)
+tradeEndH = getHour(tradeEndTime)
+tradeEndM = getMinute(tradeEndTime)
+
+// Time window checks
+currentTimeMinutes = currentHour * 60 + currentMinute
+orStartMinutes = orStartH * 60 + orStartM
+orEndMinutes = orEndH * 60 + orEndM
+tradeStartMinutes = tradeStartH * 60 + tradeStartM
+tradeEndMinutes = tradeEndH * 60 + tradeEndM
+
+isInORWindow = currentTimeMinutes >= orStartMinutes and currentTimeMinutes < orEndMinutes
+isAfterOR = currentTimeMinutes >= orEndMinutes
+isInTradingWindow = currentTimeMinutes >= tradeStartMinutes and currentTimeMinutes <= tradeEndMinutes
+isAtOREnd = currentHour == orEndH and currentMinute == orEndM
+
+// New day detection
+var int currentDay = 0
+var float dailyPnLStart = 0.0
+var int dailyTrades = 0
+var float orHigh = na
+var float orLow = na
+var float vwapAtOrEnd = na
+var bool isTradable = false
+
+if dayofweek != dayofweek[1] or dayofweek[1] == na
+    // Reset daily variables
+    currentDay := dayofweek
+    dailyPnLStart := strategy.netprofit
+    dailyTrades := 0
+    orHigh := na
+    orLow := na
+    vwapAtOrEnd := na
+    isTradable := false
+
+// ============================================================================
+// VWAP CALCULATION
+// ============================================================================
+
+// VWAP resets at session start (09:30)
+var float vwap = na
+var float vwapVolume = 0.0
+var float vwapValue = 0.0
+var bool vwapReset = false
+
+isAtORStart = currentHour == orStartH and currentMinute == orStartM
+
+if isAtORStart
+    // Reset VWAP at OR start
+    vwap := na
+    vwapVolume := 0.0
+    vwapValue := 0.0
+    vwapReset := true
+
+// VWAP only accumulates during trading window (09:30-11:15) to prevent after-hours accumulation
+if isInORWindow or (isAfterOR and isInTradingWindow)
+    if vwapReset or na(vwap)
+        // First bar of session - initialize
+        vwapVolume := volume
+        vwapValue := hlc3 * volume
+        vwap := vwapValue / vwapVolume
+        vwapReset := false
+    else
+        // Update VWAP
+        vwapVolume := vwapVolume + volume
+        vwapValue := vwapValue + (hlc3 * volume)
+        vwap := vwapValue / vwapVolume
+else if not isInTradingWindow
+    // Stop updating VWAP after trading window ends
+    // Keep last calculated value for plotting, but don't accumulate
+
+// Capture VWAP at OR end (09:45)
+if isAtOREnd and not na(vwap)
+    vwapAtOrEnd := vwap
+
+// ============================================================================
+// OPENING RANGE CALCULATION
+// ============================================================================
+
+// Calculate OR High/Low during OR window
+if isInORWindow
+    if na(orHigh) or high > orHigh
+        orHigh := high
+    if na(orLow) or low < orLow
+        orLow := low
+
+// OR Width validation at OR end
+if isAtOREnd and not na(orHigh) and not na(orLow) and not na(close)
+    orWidth = orHigh - orLow
+    orWidthPct = (orWidth / close) * 100
+    isTradable := orWidthPct >= orWidthMinPct and orWidthPct <= orWidthMaxPct
+
+// ============================================================================
+// DIRECTION FILTER (VWAP Bias)
+// ============================================================================
+
+var bool allowLong = false
+var bool allowShort = false
+
+if isAtOREnd and not na(vwapAtOrEnd) and not na(close)
+    // Use strict comparison to prevent both flags being true simultaneously
+    // If price exactly equals VWAP, neither flag is set (no trade bias for that day)
+    allowLong := close > vwapAtOrEnd
+    allowShort := close < vwapAtOrEnd
+
+// ============================================================================
+// ATR CALCULATION
+// ============================================================================
+
+atrValue = ta.atr(atrLength)
+
+// ============================================================================
+// POSITION SIZING
+// ============================================================================
+
+calculateQuantity(entryPrice, stopPrice, riskAmount) =>
+    stopDistance = math.abs(entryPrice - stopPrice)
+    slippageCost = slippageTicks * tickSize
+    // Account for commission on entry and exit (rough estimate)
+    commissionCost = entryPrice * (commissionPct / 100) * 2  // Entry + exit
+    totalCostPerShare = stopDistance + slippageCost + commissionCost
+    if totalCostPerShare > 0
+        qty = math.floor(riskAmount / totalCostPerShare)
+        math.max(1, qty)  // Minimum 1 share
+    else
+        1
+
+// ============================================================================
+// STOP LOSS CALCULATION
+// ============================================================================
+
+calculateStopLoss(isLong, entryPrice, orHigh, orLow, atr) =>
+    // OR-based stop
+    orStop = isLong ? orLow : orHigh
+    
+    // ATR-based stop
+    atrStop = isLong ? entryPrice - (atr * atrMult) : entryPrice + (atr * atrMult)
+    
+    // Use tighter stop
+    isLong ? math.max(orStop, atrStop) : math.min(orStop, atrStop)
+
+// ============================================================================
+// TRADE LOGIC
+// ============================================================================
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+var float initialRisk = na
+var bool stopMovedToBE = false
+
+// Calculate current daily P&L
+currentDailyPnL = strategy.netprofit - dailyPnLStart
+
+// Check if we can trade today
+canTradeToday = isTradable and dailyTrades < maxTradesPerDay and currentDailyPnL > -dailyMaxLoss
+
+// Long entry: Break above OR High after 09:45
+longCondition = canTradeToday and isAfterOR and isInTradingWindow and allowLong and not na(orHigh) and close > orHigh and strategy.position_size == 0
+
+if longCondition
+    entryPrice := close
+    stopLoss := calculateStopLoss(true, entryPrice, orHigh, orLow, atrValue)
+    initialRisk := math.abs(entryPrice - stopLoss)
+    takeProfit := entryPrice + (initialRisk * tpMultiple)
+    stopMovedToBE := false
+    
+    qty = calculateQuantity(entryPrice, stopLoss, riskPerTrade)
+    strategy.entry("Long", strategy.long, qty=qty, comment="ORB Long")
+
+// Short entry: Break below OR Low after 09:45
+shortCondition = canTradeToday and isAfterOR and isInTradingWindow and allowShort and not na(orLow) and close < orLow and strategy.position_size == 0
+
+if shortCondition
+    entryPrice := close
+    stopLoss := calculateStopLoss(false, entryPrice, orHigh, orLow, atrValue)
+    initialRisk := math.abs(entryPrice - stopLoss)
+    takeProfit := entryPrice - (initialRisk * tpMultiple)
+    stopMovedToBE := false
+    
+    qty = calculateQuantity(entryPrice, stopLoss, riskPerTrade)
+    strategy.entry("Short", strategy.short, qty=qty, comment="ORB Short")
+
+// Break-even logic: Move stop to entry when profit reaches +0.6R
+if strategy.position_size != 0 and not stopMovedToBE and not na(initialRisk) and initialRisk > 0
+    unrealizedProfit = strategy.openprofit
+    profitInR = unrealizedProfit / initialRisk
+    
+    if profitInR >= beTriggerR
+        stopLoss := entryPrice
+        stopMovedToBE := true
+
+// Update stop loss and take profit orders
+if strategy.position_size != 0
+    if strategy.position_size > 0
+        strategy.exit("Exit", "Long", stop=stopLoss, limit=takeProfit, comment=stopMovedToBE ? "BE" : "SL/TP")
+    else
+        strategy.exit("Exit", "Short", stop=stopLoss, limit=takeProfit, comment=stopMovedToBE ? "BE" : "SL/TP")
+
+// Track daily trades
+if strategy.closedtrades > strategy.closedtrades[1]
+    dailyTrades := dailyTrades + 1
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// OR High/Low lines (only show after OR is established)
+plot(orHigh, "OR High", color=color.new(color.green, 0), linewidth=2, style=plot.style_line)
+plot(orLow, "OR Low", color=color.new(color.red, 0), linewidth=2, style=plot.style_line)
+
+// VWAP
+plot(vwap, "VWAP", color=color.new(color.blue, 50), linewidth=1, style=plot.style_line)
+
+// Entry price line (when in position)
+plot(strategy.position_size != 0 ? entryPrice : na, "Entry", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_line)
+plot(strategy.position_size != 0 ? stopLoss : na, "Stop Loss", color=color.new(color.red, 0), linewidth=1, style=plot.style_dash)
+plot(strategy.position_size != 0 ? takeProfit : na, "Take Profit", color=color.new(color.green, 0), linewidth=1, style=plot.style_dash)
+
+// ============================================================================
+// LABELS
+// ============================================================================
+
+// Tradability label (show at OR end)
+var label tradabilityLabel = na
+if isAtOREnd
+    label.delete(tradabilityLabel)
+    if isTradable
+        tradabilityLabel := label.new(bar_index, high, "✅ TRADABLE\nOR Width: " + str.tostring((orHigh - orLow) / close * 100, "#.##") + "%", 
+                                      color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+    else
+        tradabilityLabel := label.new(bar_index, high, "❌ NOT TRADABLE\nOR Width: " + str.tostring((orHigh - orLow) / close * 100, "#.##") + "%", 
+                                      color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// VWAP Bias label (show at OR end)
+var label vwapBiasLabel = na
+if isAtOREnd and not na(vwapAtOrEnd) and not na(close)
+    label.delete(vwapBiasLabel)
+    biasText = allowLong ? "🔼 LONG BIAS" : (allowShort ? "🔽 SHORT BIAS" : "⚪ NEUTRAL")
+    vwapBiasLabel := label.new(bar_index, low, biasText + "\nPrice: " + str.tostring(close, "#.##") + "\nVWAP: " + str.tostring(vwapAtOrEnd, "#.##"), 
+                               color=color.new(color.blue, 80), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// ============================================================================
+// TEST CHECKLIST
+// ============================================================================
+
+// TEST CHECKLIST - How to Run Last 7 Trading Days:
+// 1. Set chart to 1-minute timeframe
+// 2. Set symbol to QQC (or appropriate exchange prefix)
+// 3. Set date range to last 7 trading days (exclude weekends)
+// 4. Run strategy with default inputs
+// 5. Record the following metrics:
+//    - Profit Factor (PF): strategy.netprofit / abs(strategy.grossloss) if grossloss < 0, else N/A
+//    - Win Rate: (strategy.wintrades / strategy.closedtrades) * 100
+//    - Avg Trade: strategy.netprofit / strategy.closedtrades
+//    - Max Drawdown: strategy.max_drawdown (or calculate from equity curve)
+//    - Trades/Day: strategy.closedtrades / number_of_trading_days
+// 6. Verify:
+//    - Max 2 trades per day enforced
+//    - Daily max loss ($8) enforced
+//    - OR width filter working (0.20% - 0.80%)
+//    - VWAP bias filter working
+//    - Break-even stops moving correctly
+//    - Position sizing targets $2 risk per trade
+
+// ============================================================================
+// ITERATION PLAN
+// ============================================================================
+
+// ITERATION PLAN - What to Tune First:
+// 1. OR Width Bounds (orWidthMinPct, orWidthMaxPct)
+//    - Start with 0.20% - 0.80% (default)
+//    - If too many no-trade days: widen range (e.g., 0.15% - 1.0%)
+//    - If losing trades from choppy days: tighten range (e.g., 0.30% - 0.60%)
+//    - Tune based on win rate and avg trade quality
+//
+// 2. ATR Multiplier (atrMult)
+//    - Start with 1.5 (default)
+//    - If stopped out too often: increase to 2.0-2.5
+//    - If stops too wide (reducing R): decrease to 1.0-1.2
+//    - Balance between stop distance and win rate
+//
+// 3. Take Profit Multiple (tpMultiple)
+//    - Start with 1.2R (default)
+//    - If leaving money on table: increase to 1.5R-2.0R
+//    - If TP rarely hit: decrease to 1.0R-1.1R
+//    - Consider trailing stop as alternative
+//
+// 4. Break-Even Trigger (beTriggerR)
+//    - Start with 0.6R (default)
+//    - If stopped out at BE too often: increase to 0.8R-1.0R
+//    - If missing larger moves: decrease to 0.4R-0.5R
+//
+// 5. Trading Window (tradeStartTime, tradeEndTime)
+//    - Default: 09:45 - 11:15
+//    - If early trades fail: start later (10:00)
+//    - If missing moves: extend window (11:30)
+//
+// WHAT NOT TO OVERFIT:
+// - Don't optimize on < 20 trades (need statistical significance)
+// - Don't change multiple parameters at once (isolate effects)
+// - Don't optimize on in-sample data only (use walk-forward)
+// - Don't ignore max trades/day and daily loss limits (they're risk controls)
+// - Don't add filters without clear edge hypothesis
+// - Don't tune commission/slippage to improve results (use realistic values)
+
