@@ -36,46 +36,23 @@ jobs:
           rm -rf .git/modules || true
           rm -f .gitmodules || true
 
-      - name: Set comparison refs
-        id: refs
+      - name: Fetch base branch (PR only)
+        if: github.event_name == 'pull_request'
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "base=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
-            echo "ref=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
-          else
-            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
-            echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Ensure base/ref commits exist locally
-        run: |
-          set -e
-          BASE_SHA="${{ steps.refs.outputs.base }}"
-          REF_SHA="${{ steps.refs.outputs.ref }}"
-          
-          # Check if base commit exists
-          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
-            echo "Base commit $BASE_SHA not found locally, fetching..."
-            git fetch --no-tags --prune --depth=1 origin "$BASE_SHA" || true
-          fi
-          
-          # Check if ref commit exists
-          if ! git cat-file -e "$REF_SHA" 2>/dev/null; then
-            echo "Ref commit $REF_SHA not found locally, fetching..."
-            git fetch --no-tags --prune --depth=1 origin "$REF_SHA" || true
-          fi
-          
-          echo "✓ Both commits available locally"
+          git fetch --no-tags --prune origin "${{ github.event.pull_request.base.ref }}"
 
       - name: Detect trading system changes
         id: detect-changes
         run: |
           set -e
-          BASE_SHA="${{ steps.refs.outputs.base }}"
-          REF_SHA="${{ steps.refs.outputs.ref }}"
           
-          # Get list of changed files
-          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$REF_SHA" || echo "")
+          # Get list of changed files based on event type
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+            CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD || echo "")
+          else
+            CHANGED_FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" || echo "")
+          fi
           
           if [ -z "$CHANGED_FILES" ]; then
             echo "trading-changed=false" >> $GITHUB_OUTPUT
@@ -132,6 +109,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
           submodules: false
 
