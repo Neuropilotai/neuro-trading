@@ -13,6 +13,7 @@
     "backtest": "node cli/backtest.js",
     "walkforward": "node cli/walkforward.js",
     "test": "mocha \"tests/**/*.test.js\"",
+    "test:ledger": "mocha \"tests/tradeLedger.test.js\"",
     "smoke": "node cli/smoke_pattern_pipeline.js"
   },
   "engines": {
