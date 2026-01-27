@@ -68,12 +68,38 @@ concurrency:
 
 jobs:
   # ================================================================
+  # JOB: Check if inventory-enterprise exists
+  # ================================================================
+  inventory-present:
+    name: Check Inventory Present
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check if inventory-enterprise exists
+        id: check
+        run: |
+          if [ -d "inventory-enterprise" ]; then
+            echo "present=true" >> $GITHUB_OUTPUT
+            echo "✓ inventory-enterprise directory found"
+          else
+            echo "present=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  inventory-enterprise directory not found - skipping inventory workflow"
+          fi
+
+  # ================================================================
   # JOB: Pre-flight Checks
   # ================================================================
   preflight:
     name: Pre-flight Checks
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('inventory-enterprise/**') != '' }}
+    needs: inventory-present
+    if: needs.inventory-present.outputs.present == 'true'
     outputs:
       environment: ${{ steps.detect-env.outputs.environment }}
       deploy_infra: ${{ steps.detect-env.outputs.deploy_infra }}
@@ -85,7 +111,39 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
+          submodules: false
+
+      - name: Set comparison refs
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Ensure base/ref commits exist locally
+        run: |
+          set -e
+          BASE_SHA="${{ steps.refs.outputs.base }}"
+          REF_SHA="${{ steps.refs.outputs.ref }}"
+          
+          # Check if base commit exists
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            echo "Base commit $BASE_SHA not found locally, fetching..."
+            git fetch --no-tags --prune --depth=1 origin "$BASE_SHA" || true
+          fi
+          
+          # Check if ref commit exists
+          if ! git cat-file -e "$REF_SHA" 2>/dev/null; then
+            echo "Ref commit $REF_SHA not found locally, fetching..."
+            git fetch --no-tags --prune --depth=1 origin "$REF_SHA" || true
+          fi
+          
+          echo "✓ Both commits available locally"
 
       - name: Detect environment
         id: detect-env
@@ -103,15 +161,37 @@ jobs:
 
       - name: Detect file changes
         id: changes
-        uses: dorny/paths-filter@v2
-        with:
-          filters: |
-            backend:
-              - 'inventory-enterprise/backend/**'
-            frontend:
-              - 'inventory-enterprise/frontend/**'
-            infra:
-              - 'inventory-enterprise/infrastructure/**'
+        run: |
+          set -e
+          BASE_SHA="${{ steps.refs.outputs.base }}"
+          REF_SHA="${{ steps.refs.outputs.ref }}"
+          
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$REF_SHA" || echo "")
+          
+          # Check for backend changes
+          if echo "$CHANGED_FILES" | grep -q "^inventory-enterprise/backend/"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check for frontend changes
+          if echo "$CHANGED_FILES" | grep -q "^inventory-enterprise/frontend/"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check for infrastructure changes
+          if echo "$CHANGED_FILES" | grep -q "^inventory-enterprise/infrastructure/"; then
+            echo "infra=true" >> $GITHUB_OUTPUT
+          else
+            echo "infra=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES" | grep "^inventory-enterprise/" | head -20 || echo "No inventory-enterprise files changed"
 
       - name: Display deployment plan
         run: |
@@ -129,7 +209,8 @@ jobs:
   security-scan:
     name: Security Audit
     runs-on: ubuntu-latest
-    needs: preflight
+    needs: [inventory-present, preflight]
+    if: needs.inventory-present.outputs.present == 'true'
 
     steps:
       - name: Checkout code
@@ -180,8 +261,10 @@ jobs:
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
-    needs: preflight
-    if: needs.preflight.outputs.backend_changed == 'true'
+    needs: [inventory-present, preflight]
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      needs.preflight.outputs.backend_changed == 'true'
 
     strategy:
       matrix:
@@ -231,8 +314,9 @@ jobs:
   build-backend:
     name: Build Backend Container
     runs-on: ubuntu-latest
-    needs: [preflight, security-scan, test-backend]
+    needs: [inventory-present, preflight, security-scan, test-backend]
     if: |
+      needs.inventory-present.outputs.present == 'true' &&
       always() &&
       needs.preflight.outputs.backend_changed == 'true' &&
       needs.security-scan.result == 'success' &&
@@ -303,11 +387,12 @@ jobs:
   deploy-infrastructure:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
-    needs: [preflight]
+    needs: [inventory-present, preflight]
     if: |
-      needs.preflight.outputs.infra_changed == 'true' ||
-      needs.preflight.outputs.deploy_infra == 'true' ||
-      github.event.inputs.deploy_infrastructure == 'true'
+      needs.inventory-present.outputs.present == 'true' &&
+      (needs.preflight.outputs.infra_changed == 'true' ||
+       needs.preflight.outputs.deploy_infra == 'true' ||
+       github.event.inputs.deploy_infrastructure == 'true')
     environment:
       name: ${{ needs.preflight.outputs.environment }}-infrastructure
       url: https://app.terraform.io/app/neuropilot/workspaces/neuropilot-${{ needs.preflight.outputs.environment }}
@@ -380,8 +465,9 @@ jobs:
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
-    needs: [preflight, build-backend, deploy-infrastructure]
+    needs: [inventory-present, preflight, build-backend, deploy-infrastructure]
     if: |
+      needs.inventory-present.outputs.present == 'true' &&
       always() &&
       needs.preflight.outputs.backend_changed == 'true' &&
       needs.build-backend.result == 'success' &&
@@ -435,8 +521,9 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
-    needs: [preflight, deploy-backend]
+    needs: [inventory-present, preflight, deploy-backend]
     if: |
+      needs.inventory-present.outputs.present == 'true' &&
       always() &&
       needs.preflight.outputs.frontend_changed == 'true' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
@@ -500,8 +587,9 @@ jobs:
   smoke-tests:
     name: Smoke Tests
     runs-on: ubuntu-latest
-    needs: [preflight, deploy-backend, deploy-frontend]
+    needs: [inventory-present, preflight, deploy-backend, deploy-frontend]
     if: |
+      needs.inventory-present.outputs.present == 'true' &&
       always() &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') &&
       (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped')
@@ -537,8 +625,10 @@ jobs:
   benchmark:
     name: Performance Benchmark
     runs-on: ubuntu-latest
-    needs: [preflight, smoke-tests]
-    if: needs.preflight.outputs.environment == 'production'
+    needs: [inventory-present, preflight, smoke-tests]
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      needs.preflight.outputs.environment == 'production'
 
     steps:
       - name: Checkout code
@@ -571,8 +661,9 @@ jobs:
   update-monitoring:
     name: Update Monitoring
     runs-on: ubuntu-latest
-    needs: [preflight, deploy-backend, deploy-frontend]
+    needs: [inventory-present, preflight, deploy-backend, deploy-frontend]
     if: |
+      needs.inventory-present.outputs.present == 'true' &&
       always() &&
       needs.deploy-backend.result == 'success' &&
       needs.preflight.outputs.environment == 'production'
@@ -612,8 +703,10 @@ jobs:
   notify:
     name: Send Notifications
     runs-on: ubuntu-latest
-    needs: [preflight, deploy-backend, deploy-frontend, smoke-tests]
-    if: needs.preflight.result != 'skipped'
+    needs: [inventory-present, preflight, deploy-backend, deploy-frontend, smoke-tests]
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      needs.preflight.result != 'skipped'
 
     steps:
       - name: Determine status
