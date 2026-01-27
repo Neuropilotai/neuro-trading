@@ -8,6 +8,7 @@ on:
       - feature/*
   pull_request:
     branches:
+      - main
       - orb-qqq-db649
 
 permissions:
@@ -19,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      trading-changed: ${{ steps.filter.outputs.trading }}
+      trading-changed: ${{ steps.detect-changes.outputs.trading-changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,24 +67,55 @@ jobs:
           
           echo "✓ Both commits available locally"
 
-      - name: Check for trading system changes
-        id: filter
-        uses: dorny/paths-filter@v2
-        with:
-          base: ${{ steps.refs.outputs.base }}
-          ref: ${{ steps.refs.outputs.ref }}
-          list-files: shell
-          filters: |
-            trading:
-              - 'backend/**'
-              - 'cli/**'
-              - 'tests/**'
-              - 'simple_webhook_server.js'
-              - 'package.json'
-              - 'package-lock.json'
-              - '.github/workflows/ci.yml'
-            inventory:
-              - 'inventory-enterprise/**'
+      - name: Detect trading system changes
+        id: detect-changes
+        run: |
+          set -e
+          BASE_SHA="${{ steps.refs.outputs.base }}"
+          REF_SHA="${{ steps.refs.outputs.ref }}"
+          
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$REF_SHA" || echo "")
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "trading-changed=false" >> $GITHUB_OUTPUT
+            echo "No files changed"
+            exit 0
+          fi
+          
+          # Trading system paths to match
+          TRADING_PATTERNS=(
+            "backend/"
+            "cli/"
+            "tests/"
+            "simple_webhook_server.js"
+            "package.json"
+            "package-lock.json"
+            ".github/workflows/ci.yml"
+          )
+          
+          # Check if any changed file matches trading patterns
+          TRADING_CHANGED=false
+          while IFS= read -r file; do
+            for pattern in "${TRADING_PATTERNS[@]}"; do
+              if [[ "$file" == "$pattern"* ]] || [[ "$file" == "$pattern" ]]; then
+                TRADING_CHANGED=true
+                echo "✓ Trading file changed: $file"
+                break
+              fi
+            done
+          done <<< "$CHANGED_FILES"
+          
+          if [ "$TRADING_CHANGED" = "true" ]; then
+            echo "trading-changed=true" >> $GITHUB_OUTPUT
+            echo "✅ Trading system changes detected"
+          else
+            echo "trading-changed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  No trading system changes detected"
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES" | head -20
 
   test:
     runs-on: ubuntu-latest
