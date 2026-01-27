@@ -49,9 +49,19 @@ jobs:
           # Get list of changed files based on event type
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
-            CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD || echo "")
+            echo "PR event: comparing $BASE_REF to HEAD"
+            CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null || echo "")
           else
-            CHANGED_FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" || echo "")
+            # For push events, use before and after commits
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            echo "Push event: comparing $BEFORE to $AFTER"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              echo "Initial commit or invalid before SHA, checking HEAD only"
+              CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            else
+              CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || echo "")
+            fi
           fi
           
           if [ -z "$CHANGED_FILES" ]; then
