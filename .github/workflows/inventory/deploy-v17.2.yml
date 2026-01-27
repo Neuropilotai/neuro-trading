@@ -22,7 +22,7 @@ on:
       - 'inventory-enterprise/backend/**'
       - 'inventory-enterprise/frontend/**'
       - 'inventory-enterprise/infrastructure/**'
-      - '.github/workflows/deploy-v17.2.yml'
+      - '.github/workflows/inventory/deploy-v17.2.yml'
   pull_request:
     branches:
       - main
