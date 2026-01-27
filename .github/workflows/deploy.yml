@@ -11,13 +11,44 @@ on:
     paths:
       - 'backend/**'
 
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}/inventory-system
 
 jobs:
+  inventory-present:
+    name: Inventory present
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.detect.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - id: detect
+        run: |
+          set -e
+          echo "Checking for inventory-enterprise files in git..."
+          FILES=$(git ls-files 'inventory-enterprise/**' 2>/dev/null || echo "")
+          if [ -n "$FILES" ] && echo "$FILES" | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "✓ Inventory files are tracked in git"
+            echo "$FILES" | head -5
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️  No inventory files tracked in git - workflow will skip"
+          fi
+
   test:
     runs-on: ubuntu-latest
+    needs: inventory-present
+    if: needs.inventory-present.outputs.present == 'true'
     defaults:
       run:
         working-directory: ./backend
@@ -47,7 +78,8 @@ jobs:
         fi
 
   build:
-    needs: test
+    needs: [inventory-present, test]
+    if: needs.inventory-present.outputs.present == 'true'
     runs-on: ubuntu-latest
     
     steps:
@@ -88,9 +120,11 @@ jobs:
         cache-to: type=gha,mode=max
 
   deploy-staging:
-    needs: build
+    needs: [inventory-present, build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      github.ref == 'refs/heads/main'
     environment: staging
     
     steps:
@@ -102,9 +136,11 @@ jobs:
         # For example: kubectl, docker-compose, or API calls to your hosting provider
 
   deploy-production:
-    needs: build
+    needs: [inventory-present, build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/production'
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      github.ref == 'refs/heads/production'
     environment: production
     
     steps:
@@ -117,9 +153,11 @@ jobs:
         # curl -X POST "https://api.render.com/deploy/srv-${{ secrets.RENDER_SERVICE_ID }}?key=${{ secrets.RENDER_API_KEY }}"
 
   security-scan:
-    needs: build
+    needs: [inventory-present, build]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      github.event_name == 'pull_request'
     
     steps:
     - name: Checkout code
@@ -139,9 +177,9 @@ jobs:
         sarif_file: 'trivy-results.sarif'
 
   notify:
-    needs: [test, build]
+    needs: [inventory-present, test, build]
     runs-on: ubuntu-latest
-    if: always()
+    if: needs.inventory-present.outputs.present == 'true'
     
     steps:
     - name: Notify deployment status
