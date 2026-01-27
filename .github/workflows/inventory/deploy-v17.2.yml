@@ -51,6 +51,10 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   NODE_VERSION: '20'
   TERRAFORM_VERSION: '1.6.0'
