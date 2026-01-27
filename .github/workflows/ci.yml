@@ -11,8 +11,36 @@ on:
       - orb-qqq-db649
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      trading-changed: ${{ steps.filter.outputs.trading }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for trading system changes
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            trading:
+              - 'backend/**'
+              - 'cli/**'
+              - 'tests/**'
+              - 'simple_webhook_server.js'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+            inventory:
+              - 'inventory-enterprise/**'
+
   test:
     runs-on: ubuntu-latest
+    needs: check-changes
+    if: needs.check-changes.outputs.trading-changed == 'true'
 
     strategy:
       fail-fast: false
