@@ -68,7 +68,7 @@ concurrency:
 
 jobs:
   # ================================================================
-  # JOB: Check if inventory-enterprise exists
+  # JOB: Check if inventory-enterprise exists (git-tracked detection)
   # ================================================================
   inventory-present:
     name: Inventory present
@@ -264,6 +264,7 @@ jobs:
     needs: [inventory-present, preflight]
     if: |
       needs.inventory-present.outputs.present == 'true' &&
+      needs.preflight.result != 'skipped' &&
       needs.preflight.outputs.backend_changed == 'true'
 
     strategy:
