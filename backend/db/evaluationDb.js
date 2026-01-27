@@ -39,8 +39,18 @@ class EvaluationDatabase {
           console.error('❌ Error creating evaluation schema:', err.message);
           reject(err);
         } else {
-          console.log('✅ Evaluation database initialized');
-          resolve();
+          // Add profit_factor column if it doesn't exist (migration)
+          this.db.run(
+            'ALTER TABLE pattern_performance ADD COLUMN profit_factor REAL',
+            (alterErr) => {
+              // Ignore error if column already exists
+              if (alterErr && !alterErr.message.includes('duplicate column')) {
+                console.warn('⚠️  Could not add profit_factor column:', alterErr.message);
+              }
+              console.log('✅ Evaluation database initialized');
+              resolve();
+            }
+          );
         }
       });
     });
@@ -177,9 +187,9 @@ class EvaluationDatabase {
       INSERT INTO pattern_performance (
         id, pattern_id, pattern_type, symbol, timeframe,
         total_trades, winning_trades, losing_trades, win_rate,
-        avg_return_pct, total_return_pct, sharpe_ratio,
+        avg_return_pct, total_return_pct, profit_factor, sharpe_ratio,
         last_trade_date, first_seen_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(pattern_id) DO UPDATE SET
         total_trades = excluded.total_trades,
         winning_trades = excluded.winning_trades,
@@ -187,6 +197,7 @@ class EvaluationDatabase {
         win_rate = excluded.win_rate,
         avg_return_pct = excluded.avg_return_pct,
         total_return_pct = excluded.total_return_pct,
+        profit_factor = excluded.profit_factor,
         sharpe_ratio = excluded.sharpe_ratio,
         last_trade_date = excluded.last_trade_date,
         last_updated = datetime('now')
@@ -205,6 +216,7 @@ class EvaluationDatabase {
         performance.winRate,
         performance.avgReturnPct,
         performance.totalReturnPct,
+        performance.profitFactor !== undefined ? performance.profitFactor : null,
         performance.sharpeRatio || null,
         performance.lastTradeDate || null,
         performance.firstSeenDate || new Date().toISOString()
@@ -306,6 +318,97 @@ class EvaluationDatabase {
             degradationDetected: row.degradation_detected === 1
           }));
           resolve(parsed);
+        }
+      });
+    });
+  }
+
+  /**
+   * Get pattern performance for given pattern IDs
+   * @param {Array<string>} patternIds - Array of pattern IDs
+   * @returns {Promise<Map<string, object>>} - Map of patternId -> performance stats
+   */
+  async getPatternPerformance(patternIds) {
+    if (!patternIds || patternIds.length === 0) {
+      return new Map();
+    }
+
+    const placeholders = patternIds.map(() => '?').join(',');
+    const query = `
+      SELECT 
+        pattern_id,
+        total_trades,
+        winning_trades,
+        losing_trades,
+        win_rate,
+        profit_factor,
+        avg_return_pct,
+        first_seen_date,
+        last_updated
+      FROM pattern_performance
+      WHERE pattern_id IN (${placeholders})
+    `;
+
+    return new Promise((resolve, reject) => {
+      this.db.all(query, patternIds, (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          const result = new Map();
+          for (const row of rows) {
+            result.set(row.pattern_id, {
+              patternId: row.pattern_id,
+              totalTrades: row.total_trades,
+              winningTrades: row.winning_trades,
+              losingTrades: row.losing_trades,
+              winRate: row.win_rate,
+              profitFactor: row.profit_factor,
+              avgReturnPct: row.avg_return_pct,
+              firstSeenDate: row.first_seen_date,
+              lastUpdated: row.last_updated
+            });
+          }
+          resolve(result);
+        }
+      });
+    });
+  }
+
+  /**
+   * Get validated patterns based on performance thresholds
+   * @param {object} config - Filter config { minWinRate, minProfitFactor, minSampleSize }
+   * @returns {Promise<Array<string>>} - Array of validated pattern IDs
+   */
+  async getValidatedPatterns(config) {
+    const {
+      minWinRate = 0.50,
+      minProfitFactor = 1.0,
+      minSampleSize = 10
+    } = config;
+
+    const query = `
+      SELECT pattern_id, profit_factor
+      FROM pattern_performance
+      WHERE total_trades >= ?
+        AND win_rate >= ?
+    `;
+
+    return new Promise((resolve, reject) => {
+      this.db.all(query, [minSampleSize, minWinRate], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          // Filter by profit_factor (handle NULL as 0)
+          const validated = rows
+            .filter(row => {
+              const pf = row.profit_factor;
+              if (pf === null || pf === undefined) {
+                return minProfitFactor === 0; // Only allow NULL if threshold is 0
+              }
+              return pf >= minProfitFactor;
+            })
+            .map(row => row.pattern_id);
+          resolve(validated);
         }
       });
     });

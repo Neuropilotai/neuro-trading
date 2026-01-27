@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS pattern_performance (
     win_rate REAL,
     avg_return_pct REAL,
     total_return_pct REAL,
+    profit_factor REAL,
     sharpe_ratio REAL,
     last_trade_date TEXT,
     first_seen_date TEXT NOT NULL,

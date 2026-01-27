@@ -105,6 +105,9 @@ class PatternAttributionService {
     stats.winRate = stats.totalTrades > 0 ? stats.winningTrades / stats.totalTrades : 0;
     stats.lastTradeDate = new Date().toISOString();
 
+    // Calculate profit_factor from trade attributions
+    stats.profitFactor = await this._calculateProfitFactor(patternId);
+
     // Update cache
     this.patternCache.set(patternId, stats);
 
@@ -113,16 +116,89 @@ class PatternAttributionService {
   }
 
   /**
-   * Get pattern performance
+   * Calculate profit_factor from trade attributions
+   * profit_factor = grossProfit / grossLoss
+   * where grossProfit = sum of winning trade PnLs
+   * and grossLoss = absolute sum of losing trade PnLs
    */
-  async getPatternPerformance(patternId) {
-    // Try cache first
-    if (this.patternCache.has(patternId)) {
-      return this.patternCache.get(patternId);
+  async _calculateProfitFactor(patternId) {
+    try {
+      const rows = await new Promise((resolve, reject) => {
+        evaluationDb.db.all(
+          'SELECT trade_pnl FROM trade_pattern_attribution WHERE pattern_id = ?',
+          [patternId],
+          (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          }
+        );
+      });
+
+      let grossProfit = 0;
+      let grossLoss = 0;
+
+      for (const row of rows) {
+        const pnl = row.trade_pnl;
+        if (pnl > 0) {
+          grossProfit += pnl;
+        } else if (pnl < 0) {
+          grossLoss += Math.abs(pnl);
+        }
+      }
+
+      // Profit factor = grossProfit / grossLoss
+      // If no losses, return Infinity if there are profits, else 0
+      if (grossLoss === 0) {
+        return grossProfit > 0 ? Infinity : 0;
+      }
+      return grossProfit / grossLoss;
+    } catch (error) {
+      console.error(`❌ Error calculating profit_factor for pattern ${patternId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get pattern performance for multiple patterns
+   * @param {Array<string>} patternIds - Array of pattern IDs (or single string for backward compat)
+   * @returns {Promise<Map<string, object>>} - Map of patternId -> performance stats
+   */
+  async getPatternPerformance(patternIds) {
+    // Handle single patternId for backward compatibility
+    if (typeof patternIds === 'string') {
+      patternIds = [patternIds];
+    }
+    if (!Array.isArray(patternIds) || patternIds.length === 0) {
+      return new Map();
     }
 
-    // TODO: Load from database if not in cache
-    return null;
+    // Check cache first
+    const result = new Map();
+    const missingIds = [];
+
+    for (const patternId of patternIds) {
+      if (this.patternCache.has(patternId)) {
+        result.set(patternId, this.patternCache.get(patternId));
+      } else {
+        missingIds.push(patternId);
+      }
+    }
+
+    // Load missing from database
+    if (missingIds.length > 0) {
+      try {
+        const dbResults = await evaluationDb.getPatternPerformance(missingIds);
+        for (const [patternId, stats] of dbResults) {
+          result.set(patternId, stats);
+          // Update cache
+          this.patternCache.set(patternId, stats);
+        }
+      } catch (error) {
+        console.error(`❌ Error loading pattern performance:`, error.message);
+      }
+    }
+
+    return result;
   }
 
   /**
