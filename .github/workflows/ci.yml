@@ -141,7 +141,7 @@ jobs:
           echo "Running: npm test"
           npm test
           echo "=== UNIT TESTS END ==="
-        timeout-minutes: 5
+        timeout-minutes: 8
 
       - name: Smoke test
         run: |

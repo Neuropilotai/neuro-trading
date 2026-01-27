@@ -84,12 +84,15 @@ jobs:
       - id: detect
         run: |
           set -e
-          if git ls-files 'inventory-enterprise/**' | grep -q .; then
+          echo "Checking for inventory-enterprise files in git..."
+          FILES=$(git ls-files 'inventory-enterprise/**' 2>/dev/null || echo "")
+          if [ -n "$FILES" ] && echo "$FILES" | grep -q .; then
             echo "present=true" >> "$GITHUB_OUTPUT"
-            echo "Inventory files are tracked"
+            echo "✓ Inventory files are tracked in git"
+            echo "$FILES" | head -5
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No inventory files tracked"
+            echo "ℹ️  No inventory files tracked in git - workflow will skip"
           fi
 
   # ================================================================
