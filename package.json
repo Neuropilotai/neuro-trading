@@ -12,7 +12,8 @@
     "verify:status": "curl -s http://localhost:3014/health | jq . || echo 'Server not running'",
     "backtest": "node cli/backtest.js",
     "walkforward": "node cli/walkforward.js",
-    "test": "mocha \"tests/**/*.test.js\""
+    "test": "mocha \"tests/**/*.test.js\"",
+    "smoke": "node cli/smoke_pattern_pipeline.js"
   },
   "engines": {
     "node": ">=20.0.0"
