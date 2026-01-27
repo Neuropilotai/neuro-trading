@@ -79,7 +79,9 @@ jobs:
 
   build:
     needs: [inventory-present, test]
-    if: needs.inventory-present.outputs.present == 'true'
+    if: |
+      needs.inventory-present.outputs.present == 'true' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ubuntu-latest
     
     steps:
@@ -125,7 +127,8 @@ jobs:
     if: |
       needs.inventory-present.outputs.present == 'true' &&
       github.ref == 'refs/heads/main'
-    environment: staging
+    environment:
+      name: staging
     
     steps:
     - name: Deploy to Staging
