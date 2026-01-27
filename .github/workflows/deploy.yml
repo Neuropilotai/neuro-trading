@@ -150,7 +150,7 @@ jobs:
         echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
         # Add your production deployment commands here
         # Example for Render.com:
-        # curl -X POST "https://api.render.com/deploy/srv-${{ secrets.RENDER_SERVICE_ID }}?key=${{ secrets.RENDER_API_KEY }}"
+        # curl -X POST "https://api.render.com/deploy/srv-${RENDER_SERVICE_ID}?key=${RENDER_API_KEY}"
 
   security-scan:
     needs: [inventory-present, build]
