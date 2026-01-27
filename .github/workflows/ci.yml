@@ -101,5 +101,11 @@ jobs:
         run: npm test
 
       - name: Smoke test
-        run: npm run smoke
+        run: |
+          set -euxo pipefail
+          echo "=== SMOKE START ==="
+          node -v
+          npm -v
+          timeout 300s npm run smoke
+          echo "=== SMOKE END ==="
         timeout-minutes: 5
