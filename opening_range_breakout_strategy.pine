@@ -125,21 +125,35 @@ if isAtORStart
     vwapValue := 0.0
     vwapReset := true
 
-// VWAP only accumulates during trading window (09:30-11:15) to prevent after-hours accumulation
-if isInORWindow or (isAfterOR and isInTradingWindow)
+// VWAP only accumulates during combined window (09:30-11:15) to prevent after-hours accumulation
+// Use explicit time window check instead of isAfterOR to prevent accumulation after 11:15
+isInVwapWindow = isInORWindow or isInTradingWindow  // 09:30-11:15
+
+if isInVwapWindow
     if vwapReset or na(vwap)
         // First bar of session - initialize
-        vwapVolume := volume
-        vwapValue := hlc3 * volume
-        vwap := vwapValue / vwapVolume
-        vwapReset := false
+        // Guard against zero volume to prevent division by zero
+        if volume > 0
+            vwapVolume := volume
+            vwapValue := hlc3 * volume
+            vwap := vwapValue / vwapVolume
+            vwapReset := false
+        else
+            // Zero volume bar - keep VWAP as na until we get volume
+            vwap := na
+            vwapVolume := 0.0
+            vwapValue := 0.0
+            vwapReset := false
     else
         // Update VWAP
         vwapVolume := vwapVolume + volume
         vwapValue := vwapValue + (hlc3 * volume)
-        vwap := vwapValue / vwapVolume
-else if not isInTradingWindow
-    // Stop updating VWAP after trading window ends
+        // Guard against zero total volume to prevent division by zero
+        if vwapVolume > 0
+            vwap := vwapValue / vwapVolume
+        // If vwapVolume is 0, keep previous VWAP value (or na if not set)
+else
+    // Stop updating VWAP after trading window ends (after 11:15)
     // Keep last calculated value for plotting, but don't accumulate
 
 // Capture VWAP at OR end (09:45)
@@ -158,7 +172,8 @@ if isInORWindow
         orLow := low
 
 // OR Width validation at OR end
-if isAtOREnd and not na(orHigh) and not na(orLow) and not na(close)
+// Guard against zero or negative close price to prevent division by zero
+if isAtOREnd and not na(orHigh) and not na(orLow) and not na(close) and close > 0
     orWidth = orHigh - orLow
     orWidthPct = (orWidth / close) * 100
     isTradable := orWidthPct >= orWidthMinPct and orWidthPct <= orWidthMaxPct
@@ -173,8 +188,13 @@ var bool allowShort = false
 if isAtOREnd and not na(vwapAtOrEnd) and not na(close)
     // Use strict comparison to prevent both flags being true simultaneously
     // If price exactly equals VWAP, neither flag is set (no trade bias for that day)
+    // This ensures mutual exclusivity: only one direction can be allowed, or neither
     allowLong := close > vwapAtOrEnd
     allowShort := close < vwapAtOrEnd
+    // Explicit check: if somehow both are true (shouldn't happen with > and <), reset both
+    if allowLong and allowShort
+        allowLong := false
+        allowShort := false
 
 // ============================================================================
 // ATR CALCULATION
@@ -298,12 +318,15 @@ plot(strategy.position_size != 0 ? takeProfit : na, "Take Profit", color=color.n
 var label tradabilityLabel = na
 if isAtOREnd
     label.delete(tradabilityLabel)
-    if isTradable
-        tradabilityLabel := label.new(bar_index, high, "✅ TRADABLE\nOR Width: " + str.tostring((orHigh - orLow) / close * 100, "#.##") + "%", 
-                                      color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
-    else
-        tradabilityLabel := label.new(bar_index, high, "❌ NOT TRADABLE\nOR Width: " + str.tostring((orHigh - orLow) / close * 100, "#.##") + "%", 
-                                      color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+    // Guard against zero or negative close price to prevent division by zero
+    if not na(orHigh) and not na(orLow) and not na(close) and close > 0
+        orWidthLabel = (orHigh - orLow) / close * 100
+        if isTradable
+            tradabilityLabel := label.new(bar_index, high, "✅ TRADABLE\nOR Width: " + str.tostring(orWidthLabel, "#.##") + "%", 
+                                          color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+        else
+            tradabilityLabel := label.new(bar_index, high, "❌ NOT TRADABLE\nOR Width: " + str.tostring(orWidthLabel, "#.##") + "%", 
+                                          color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
 
 // VWAP Bias label (show at OR end)
 var label vwapBiasLabel = na
