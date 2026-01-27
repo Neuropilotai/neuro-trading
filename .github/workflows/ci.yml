@@ -13,6 +13,7 @@ on:
 jobs:
   check-changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       trading-changed: ${{ steps.filter.outputs.trading }}
     steps:
@@ -22,10 +23,30 @@ jobs:
           fetch-depth: 2
           submodules: false
 
+      - name: Harden against submodules
+        run: |
+          git config --global submodule.recurse false
+          git submodule deinit -f --all || true
+          rm -rf .git/modules || true
+          rm -f .gitmodules || true
+
+      - name: Set comparison refs
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Check for trading system changes
         id: filter
         uses: dorny/paths-filter@v2
         with:
+          base: ${{ steps.refs.outputs.base }}
+          ref: ${{ steps.refs.outputs.ref }}
           filters: |
             trading:
               - 'backend/**'
@@ -56,6 +77,13 @@ jobs:
           fetch-depth: 2
           submodules: false
 
+      - name: Harden against submodules
+        run: |
+          git config --global submodule.recurse false
+          git submodule deinit -f --all || true
+          rm -rf .git/modules || true
+          rm -f .gitmodules || true
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -75,4 +103,3 @@ jobs:
       - name: Smoke test
         run: npm run smoke
         timeout-minutes: 5
-
