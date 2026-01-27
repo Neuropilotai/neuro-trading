@@ -136,3 +136,4 @@ backend/SNAPSHOT_WORKFLOW_GUIDE.md
 # Additional inventory artifacts
 archive/legacy/scripts/test-inventory.js
 src/components/
+tests/validate_pattern_filtering.js
