@@ -78,17 +78,8 @@ describe('Pattern Performance Filtering', () => {
 
   beforeEach(async () => {
     // Clear tables before each test
-    await new Promise((resolve, reject) => {
-      testDb.run('DELETE FROM trade_pattern_attribution', (err) => {
-        if (err) reject(err);
-        else {
-          testDb.run('DELETE FROM pattern_performance', (err2) => {
-            if (err2) reject(err2);
-            else resolve();
-          });
-        }
-      });
-    });
+    await evaluationDb.runAsync('DELETE FROM trade_pattern_attribution');
+    await evaluationDb.runAsync('DELETE FROM pattern_performance');
   });
 
   describe('Pattern Performance Storage', () => {
@@ -110,47 +101,17 @@ describe('Pattern Performance Filtering', () => {
         firstSeenDate: new Date().toISOString()
       });
 
-      // Add winning trades
-      await evaluationDb.saveTradePatternAttribution('TRADE_1', patternId, {
-        patternConfidence: 0.8,
-        tradePnL: 100,
-        tradePnLPct: 1.0
-      });
-      await evaluationDb.saveTradePatternAttribution('TRADE_2', patternId, {
-        patternConfidence: 0.8,
-        tradePnL: 50,
-        tradePnLPct: 0.5
-      });
-
-      // Add losing trades
-      await evaluationDb.saveTradePatternAttribution('TRADE_3', patternId, {
-        patternConfidence: 0.8,
-        tradePnL: -30,
-        tradePnLPct: -0.3
-      });
-      await evaluationDb.saveTradePatternAttribution('TRADE_4', patternId, {
-        patternConfidence: 0.8,
-        tradePnL: -20,
-        tradePnLPct: -0.2
-      });
-
-      // Update pattern performance
+      // Update pattern performance via attributeTrade (idempotent - can be called multiple times)
       await patternAttributionService.attributeTrade('TRADE_1', [{ patternId, confidence: 0.8, patternType: 'double_top' }], { pnl: 100, pnlPct: 1.0 });
       await patternAttributionService.attributeTrade('TRADE_2', [{ patternId, confidence: 0.8, patternType: 'double_top' }], { pnl: 50, pnlPct: 0.5 });
       await patternAttributionService.attributeTrade('TRADE_3', [{ patternId, confidence: 0.8, patternType: 'double_top' }], { pnl: -30, pnlPct: -0.3 });
       await patternAttributionService.attributeTrade('TRADE_4', [{ patternId, confidence: 0.8, patternType: 'double_top' }], { pnl: -20, pnlPct: -0.2 });
 
-      // Get pattern performance
-      const perf = await new Promise((resolve, reject) => {
-        testDb.get(
-          'SELECT profit_factor FROM pattern_performance WHERE pattern_id = ?',
-          [patternId],
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
+      // Get pattern performance using async helper
+      const perf = await evaluationDb.getAsync(
+        'SELECT profit_factor FROM pattern_performance WHERE pattern_id = ?',
+        [patternId]
+      );
 
       // Profit factor = (100 + 50) / (30 + 20) = 150 / 50 = 3.0
       assert.strictEqual(perf.profit_factor, 3.0, 'Profit factor should be 3.0');
@@ -177,20 +138,14 @@ describe('Pattern Performance Filtering', () => {
       await patternAttributionService.attributeTrade('TRADE_5', [{ patternId, confidence: 0.8, patternType: 'double_bottom' }], { pnl: 100, pnlPct: 1.0 });
       await patternAttributionService.attributeTrade('TRADE_6', [{ patternId, confidence: 0.8, patternType: 'double_bottom' }], { pnl: 50, pnlPct: 0.5 });
 
-      // Get pattern performance
-      const perf = await new Promise((resolve, reject) => {
-        testDb.get(
-          'SELECT profit_factor FROM pattern_performance WHERE pattern_id = ?',
-          [patternId],
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
+      // Get pattern performance using async helper
+      const perf = await evaluationDb.getAsync(
+        'SELECT profit_factor FROM pattern_performance WHERE pattern_id = ?',
+        [patternId]
+      );
 
-      // Should be Infinity when no losses
-      assert.strictEqual(perf.profit_factor, Infinity, 'Profit factor should be Infinity when no losses');
+      // Should be NULL when no losses (Infinity is not reliably stored in SQLite)
+      assert.strictEqual(perf.profit_factor, null, 'Profit factor should be NULL when no losses (not Infinity)');
     });
   });
 

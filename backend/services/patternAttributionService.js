@@ -45,7 +45,7 @@ class PatternAttributionService {
     if (!stats) {
       // Try to load from database
       try {
-        const existing = await evaluationDb.db.get(
+        const existing = await evaluationDb.getAsync(
           'SELECT * FROM pattern_performance WHERE pattern_id = ?',
           [patternId]
         );
@@ -120,19 +120,15 @@ class PatternAttributionService {
    * profit_factor = grossProfit / grossLoss
    * where grossProfit = sum of winning trade PnLs
    * and grossLoss = absolute sum of losing trade PnLs
+   * 
+   * Returns NULL if grossLoss == 0 (instead of Infinity) for SQLite compatibility
    */
   async _calculateProfitFactor(patternId) {
     try {
-      const rows = await new Promise((resolve, reject) => {
-        evaluationDb.db.all(
-          'SELECT trade_pnl FROM trade_pattern_attribution WHERE pattern_id = ?',
-          [patternId],
-          (err, result) => {
-            if (err) reject(err);
-            else resolve(result);
-          }
-        );
-      });
+      const rows = await evaluationDb.allAsync(
+        'SELECT trade_pnl FROM trade_pattern_attribution WHERE pattern_id = ?',
+        [patternId]
+      );
 
       let grossProfit = 0;
       let grossLoss = 0;
@@ -147,9 +143,9 @@ class PatternAttributionService {
       }
 
       // Profit factor = grossProfit / grossLoss
-      // If no losses, return Infinity if there are profits, else 0
+      // If no losses, return NULL (not Infinity) for SQLite compatibility
       if (grossLoss === 0) {
-        return grossProfit > 0 ? Infinity : 0;
+        return grossProfit > 0 ? null : 0; // NULL means "perfect" (no losses), 0 means no profits
       }
       return grossProfit / grossLoss;
     } catch (error) {

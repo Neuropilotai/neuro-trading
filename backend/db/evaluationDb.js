@@ -71,6 +71,42 @@ class EvaluationDatabase {
   }
 
   /**
+   * Promise-based wrapper for db.run()
+   */
+  async runAsync(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.run(sql, params, function(err) {
+        if (err) reject(err);
+        else resolve({ lastID: this.lastID, changes: this.changes });
+      });
+    });
+  }
+
+  /**
+   * Promise-based wrapper for db.get()
+   */
+  async getAsync(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.get(sql, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  }
+
+  /**
+   * Promise-based wrapper for db.all()
+   */
+  async allAsync(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.all(sql, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }
+
+  /**
    * Save backtest run
    */
   async saveBacktestRun(backtestData) {
@@ -228,11 +264,11 @@ class EvaluationDatabase {
   }
 
   /**
-   * Save trade-pattern attribution
+   * Save trade-pattern attribution (idempotent)
    */
   async saveTradePatternAttribution(tradeId, patternId, attribution) {
     const query = `
-      INSERT INTO trade_pattern_attribution (
+      INSERT OR IGNORE INTO trade_pattern_attribution (
         id, trade_id, pattern_id, pattern_confidence, trade_pnl, trade_pnl_pct
       ) VALUES (?, ?, ?, ?, ?, ?)
     `;
@@ -242,19 +278,14 @@ class EvaluationDatabase {
     const hash = crypto.createHash('sha256').update(`${tradeId}|${patternId}`).digest('hex');
     const id = `attr_${hash.substring(0, 16)}`;
 
-    return new Promise((resolve, reject) => {
-      this.db.run(query, [
-        id,
-        tradeId,
-        patternId,
-        attribution.patternConfidence,
-        attribution.tradePnL,
-        attribution.tradePnLPct
-      ], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    return this.runAsync(query, [
+      id,
+      tradeId,
+      patternId,
+      attribution.patternConfidence,
+      attribution.tradePnL,
+      attribution.tradePnLPct
+    ]);
   }
 
   /**
@@ -349,29 +380,24 @@ class EvaluationDatabase {
       WHERE pattern_id IN (${placeholders})
     `;
 
-    return new Promise((resolve, reject) => {
-      this.db.all(query, patternIds, (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          const result = new Map();
-          for (const row of rows) {
-            result.set(row.pattern_id, {
-              patternId: row.pattern_id,
-              totalTrades: row.total_trades,
-              winningTrades: row.winning_trades,
-              losingTrades: row.losing_trades,
-              winRate: row.win_rate,
-              profitFactor: row.profit_factor,
-              avgReturnPct: row.avg_return_pct,
-              firstSeenDate: row.first_seen_date,
-              lastUpdated: row.last_updated
-            });
-          }
-          resolve(result);
-        }
+    const rows = await this.allAsync(query, patternIds);
+    
+    const result = new Map();
+    for (const row of rows) {
+      result.set(row.pattern_id, {
+        patternId: row.pattern_id,
+        totalTrades: row.total_trades,
+        winningTrades: row.winning_trades,
+        losingTrades: row.losing_trades,
+        winRate: row.win_rate,
+        profitFactor: row.profit_factor,
+        avgReturnPct: row.avg_return_pct,
+        firstSeenDate: row.first_seen_date,
+        lastUpdated: row.last_updated
       });
-    });
+    }
+    
+    return result;
   }
 
   /**
@@ -393,25 +419,21 @@ class EvaluationDatabase {
         AND win_rate >= ?
     `;
 
-    return new Promise((resolve, reject) => {
-      this.db.all(query, [minSampleSize, minWinRate], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          // Filter by profit_factor (handle NULL as 0)
-          const validated = rows
-            .filter(row => {
-              const pf = row.profit_factor;
-              if (pf === null || pf === undefined) {
-                return minProfitFactor === 0; // Only allow NULL if threshold is 0
-              }
-              return pf >= minProfitFactor;
-            })
-            .map(row => row.pattern_id);
-          resolve(validated);
+    const rows = await this.allAsync(query, [minSampleSize, minWinRate]);
+    
+    // Filter by profit_factor
+    // NULL profit_factor means "perfect" (no losses) but we treat it as failing threshold unless minProfitFactor == 0
+    const validated = rows
+      .filter(row => {
+        const pf = row.profit_factor;
+        if (pf === null || pf === undefined) {
+          return minProfitFactor === 0; // Only allow NULL if threshold is 0
         }
-      });
-    });
+        return pf >= minProfitFactor;
+      })
+      .map(row => row.pattern_id);
+    
+    return validated;
   }
 }
 

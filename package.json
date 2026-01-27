@@ -11,9 +11,16 @@
     "verify:webhook": "./scripts/verify_tradingview_webhook.sh",
     "verify:status": "curl -s http://localhost:3014/health | jq . || echo 'Server not running'",
     "backtest": "node cli/backtest.js",
-    "walkforward": "node cli/walkforward.js"
+    "walkforward": "node cli/walkforward.js",
+    "test": "mocha \"tests/**/*.test.js\""
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "mocha": "^11.7.5"
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.7"
   }
 }
