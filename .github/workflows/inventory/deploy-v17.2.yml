@@ -701,6 +701,8 @@ jobs:
   # ================================================================
   # JOB: Notification
   # ================================================================
+  # Note: This job only runs if inventory-present.outputs.present == 'true'
+  # On trading-only branches (no inventory-enterprise/), this job is skipped
   notify:
     name: Send Notifications
     runs-on: ubuntu-latest
