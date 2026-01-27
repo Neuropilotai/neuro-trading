@@ -71,25 +71,25 @@ jobs:
   # JOB: Check if inventory-enterprise exists
   # ================================================================
   inventory-present:
-    name: Check Inventory Present
+    name: Inventory present
     runs-on: ubuntu-latest
     outputs:
-      present: ${{ steps.check.outputs.present }}
+      present: ${{ steps.detect.outputs.present }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          submodules: false
 
-      - name: Check if inventory-enterprise exists
-        id: check
+      - id: detect
         run: |
-          if [ -d "inventory-enterprise" ]; then
-            echo "present=true" >> $GITHUB_OUTPUT
-            echo "✓ inventory-enterprise directory found"
+          set -e
+          if git ls-files 'inventory-enterprise/**' | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "Inventory files are tracked"
           else
-            echo "present=false" >> $GITHUB_OUTPUT
-            echo "ℹ️  inventory-enterprise directory not found - skipping inventory workflow"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No inventory files tracked"
           fi
 
   # ================================================================
@@ -703,9 +703,10 @@ jobs:
   notify:
     name: Send Notifications
     runs-on: ubuntu-latest
-    needs: [inventory-present, preflight, deploy-backend, deploy-frontend, smoke-tests]
+    needs: [inventory-present]
     if: ${{ needs.inventory-present.outputs.present == 'true' && always() }}
     steps:
       - name: Notify
         run: |
-          echo "Inventory workflow ran (inventory present). Notify here."
+          echo "Inventory workflow ran (inventory present)."
+          echo "Add Slack/email notification here."
