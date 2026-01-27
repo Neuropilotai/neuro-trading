@@ -39,6 +39,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: check-changes
     if: needs.check-changes.outputs.trading-changed == 'true'
 
@@ -69,4 +70,5 @@ jobs:
 
       - name: Smoke test
         run: npm run smoke
+        timeout-minutes: 5
 
