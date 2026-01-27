@@ -1,10 +1,17 @@
 {
-  "name": "neuro-pilot-ai",
+  "name": "neuro-pilot-ai-trading",
   "version": "1.0.0",
   "private": true,
+  "description": "Trading system only - isolated from inventory system",
   "scripts": {
-    "postinstall": "cd inventory-enterprise/backend && npm ci",
-    "start": "cd inventory-enterprise/backend && node scripts/init-postgres.js && node server-v21_1.js"
+    "start": "node simple_webhook_server.js",
+    "daemon:start": "node backend/services/learningDaemon.js",
+    "daemon:stop": "pkill -f learningDaemon || true",
+    "daemon:status": "curl -s http://localhost:3014/learn/status | jq . || echo 'Daemon not running'",
+    "verify:webhook": "./scripts/verify_tradingview_webhook.sh",
+    "verify:status": "curl -s http://localhost:3014/health | jq . || echo 'Server not running'",
+    "backtest": "node cli/backtest.js",
+    "walkforward": "node cli/walkforward.js"
   },
   "engines": {
     "node": ">=20.0.0"
