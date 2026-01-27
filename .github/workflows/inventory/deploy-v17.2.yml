@@ -704,71 +704,8 @@ jobs:
     name: Send Notifications
     runs-on: ubuntu-latest
     needs: [inventory-present, preflight, deploy-backend, deploy-frontend, smoke-tests]
-    if: |
-      needs.inventory-present.outputs.present == 'true' &&
-      needs.preflight.result != 'skipped'
-
+    if: ${{ needs.inventory-present.outputs.present == 'true' && always() }}
     steps:
-      - name: Determine status
-        id: status
+      - name: Notify
         run: |
-          if [[ "${{ needs.deploy-backend.result }}" == "success" && "${{ needs.deploy-frontend.result }}" == "success" && "${{ needs.smoke-tests.result }}" == "success" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "emoji=✅" >> $GITHUB_OUTPUT
-            echo "color=good" >> $GITHUB_OUTPUT
-          else
-            echo "status=failed" >> $GITHUB_OUTPUT
-            echo "emoji=❌" >> $GITHUB_OUTPUT
-            echo "color=danger" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Slack notification
-        if: secrets.SLACK_WEBHOOK_URL != ''
-        run: |
-          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
-            -H "Content-Type: application/json" \
-            -d '{
-              "text": "${{ steps.status.outputs.emoji }} NeuroPilot v17.2 Deployment ${{ steps.status.outputs.status }}",
-              "attachments": [{
-                "color": "${{ steps.status.outputs.color }}",
-                "fields": [
-                  {"title": "Environment", "value": "${{ needs.preflight.outputs.environment }}", "short": true},
-                  {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-                  {"title": "Author", "value": "${{ github.actor }}", "short": true},
-                  {"title": "Branch", "value": "${{ github.ref_name }}", "short": true}
-                ],
-                "footer": "GitHub Actions",
-                "ts": '$(($(date +%s)))'
-              }]
-            }'
-
-      - name: Post deployment summary
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY <<'EOF'
-          # 🚀 NeuroPilot v17.2 Deployment Summary
-
-          ## Status: ${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.status }}
-
-          ### Environment
-          - **Target**: ${{ needs.preflight.outputs.environment }}
-          - **Commit**: ${{ github.sha }}
-          - **Author**: ${{ github.actor }}
-
-          ### Deployments
-          - **Backend**: ${{ needs.deploy-backend.result }}
-          - **Frontend**: ${{ needs.deploy-frontend.result }}
-          - **Infrastructure**: ${{ needs.deploy-infrastructure.result }}
-
-          ### Tests
-          - **Security Scan**: ${{ needs.security-scan.result }}
-          - **Backend Tests**: ${{ needs.test-backend.result }}
-          - **Smoke Tests**: ${{ needs.smoke-tests.result }}
-
-          ### URLs
-          - Frontend: https://inventory-${{ needs.preflight.outputs.environment }}.neuropilot.ai
-          - API: https://api-${{ needs.preflight.outputs.environment }}.neuropilot.ai
-          - Grafana: ${{ secrets.GRAFANA_CLOUD_URL }}
-
-          ---
-          *Deployed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")*
-          EOF
+          echo "Inventory workflow ran (inventory present). Notify here."
