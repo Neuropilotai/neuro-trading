@@ -88,7 +88,8 @@ class BacktestEngine {
       initialBalance: initialCapital,
       positions: new Map(), // symbol -> {action, quantity, entryPrice, entryTime, stopLoss, takeProfit}
       equity: initialCapital,
-      trades: []
+      trades: [],
+      tradeCounter: 0 // Deterministic trade counter
     };
 
     // Track metrics
@@ -96,7 +97,6 @@ class BacktestEngine {
     let peakEquity = initialCapital;
     let maxDrawdown = 0;
     let maxDrawdownPct = 0;
-    let tradeCounter = 0; // Deterministic trade counter
 
     // Determine asset class for spread
     const assetClass = this._getAssetClass(symbol);
@@ -122,14 +122,13 @@ class BacktestEngine {
             spreadPct,
             slippagePct,
             commissionPct,
-            symbol,
-            tradeCounter
+            symbol
           );
         }
       }
 
       // Check stop loss / take profit on current candle
-      await this._checkExits(candle, account, spreadPct, slippagePct, commissionPct, symbol, tradeCounter);
+      await this._checkExits(candle, account, spreadPct, slippagePct, commissionPct, symbol);
 
       // Update equity
       account.equity = this._calculateEquity(account, candle.close);
@@ -158,10 +157,9 @@ class BacktestEngine {
         slippagePct,
         commissionPct,
         sym,
-        'Backtest end',
-        tradeCounter
+        'Backtest end'
       );
-      tradeCounter++;
+      account.tradeCounter++;
     }
 
     // Calculate final metrics
@@ -243,10 +241,9 @@ class BacktestEngine {
           slippagePct,
           commissionPct,
           symbol,
-          signal.reason || 'Signal close',
-          tradeCounter
+          signal.reason || 'Signal close'
         );
-        tradeCounter++;
+        account.tradeCounter++;
       }
     } else if (signal.action === 'BUY') {
       // Close existing position if any
@@ -260,10 +257,9 @@ class BacktestEngine {
           slippagePct,
           commissionPct,
           symbol,
-          'Reversing position',
-          tradeCounter
+          'Reversing position'
         );
-        tradeCounter++;
+        account.tradeCounter++;
       }
 
       // Calculate position size (use 10% of equity)
@@ -297,7 +293,7 @@ class BacktestEngine {
    * Check stop loss / take profit
    * If both hit same candle, assume worst-case (stop loss for long, stop loss for short)
    */
-  async _checkExits(candle, account, spreadPct, slippagePct, commissionPct, symbol, tradeCounter) {
+  async _checkExits(candle, account, spreadPct, slippagePct, commissionPct, symbol) {
     const position = account.positions.get(symbol);
     if (!position) return;
 
@@ -315,10 +311,9 @@ class BacktestEngine {
         slippagePct,
         commissionPct,
         symbol,
-        'Stop loss (both hit)',
-        tradeCounter
+        'Stop loss (both hit)'
       );
-      tradeCounter++;
+      account.tradeCounter++;
       return;
     }
 
@@ -332,10 +327,9 @@ class BacktestEngine {
         slippagePct,
         commissionPct,
         symbol,
-        'Stop loss',
-        tradeCounter
+        'Stop loss'
       );
-      tradeCounter++;
+      account.tradeCounter++;
       return;
     }
 
@@ -349,10 +343,9 @@ class BacktestEngine {
         slippagePct,
         commissionPct,
         symbol,
-        'Take profit',
-        tradeCounter
+        'Take profit'
       );
-      tradeCounter++;
+      account.tradeCounter++;
       return;
     }
   }
@@ -360,7 +353,7 @@ class BacktestEngine {
   /**
    * Close position
    */
-  async _closePosition(position, candle, account, spreadPct, slippagePct, commissionPct, symbol, reason, tradeCounter) {
+  async _closePosition(position, candle, account, spreadPct, slippagePct, commissionPct, symbol, reason) {
     // Use stop loss/take profit price if hit, otherwise use candle close
     let exitPrice = candle.close;
     if (reason === 'Stop loss' && position.stopLoss) {
@@ -386,7 +379,7 @@ class BacktestEngine {
 
     // Record trade (deterministic ID)
     const trade = {
-      id: `trade_${symbol}_${candle.ts}_${tradeCounter}`,
+      id: `trade_${symbol}_${candle.ts}_${account.tradeCounter}`,
       symbol,
       action: position.action,
       entryPrice: position.entryPrice,
