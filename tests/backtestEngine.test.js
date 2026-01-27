@@ -14,24 +14,23 @@ describe('BacktestEngine', () => {
       class LookaheadTestStrategy extends require('../backend/strategies/Strategy') {
         constructor() {
           super('lookahead_test', 'Lookahead Test');
-          this.state = {
-            seenCandles: [],
-            signals: []
-          };
+          this.seenCloses = [];   // must exist
+          this.seenTimes = [];    // optional, if you log timestamps
         }
 
         generateSignal(candle, state) {
           // Record that we've seen this candle
-          state.seenCandles.push(candle.ts);
+          this.seenCloses.push(candle.close);
+          this.seenTimes.push(candle.ts);
           
           // Verify we haven't seen future candles
-          const futureCandles = state.seenCandles.filter(ts => ts > candle.ts);
+          const futureCandles = this.seenTimes.filter(ts => ts > candle.ts);
           if (futureCandles.length > 0) {
             throw new Error(`LOOKAHEAD DETECTED: Saw future candle ${futureCandles[0]} while processing ${candle.ts}`);
           }
 
           // Generate simple signal (every 10th candle)
-          if (state.seenCandles.length % 10 === 0) {
+          if (this.seenTimes.length % 10 === 0) {
             return {
               action: 'BUY',
               confidence: 0.5
