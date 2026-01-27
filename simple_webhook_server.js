@@ -12,6 +12,9 @@
  * - ENABLE_TRADE_LEDGER: Enable immutable trade ledger (default: true)
  */
 
+// Load environment variables first
+require('dotenv').config();
+
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
@@ -38,7 +41,8 @@ const { getBrokerAdapter } = require('./backend/adapters/brokerAdapterFactory');
 const tradingViewTelemetry = require('./backend/services/tradingViewTelemetry');
 
 const app = express();
-const port = process.env.WEBHOOK_PORT || 3014;
+// Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
+const port = Number(process.env.PORT || process.env.WEBHOOK_PORT || 3014);
 
 // Store raw body for HMAC verification using express.json verify option
 app.use(express.json({
@@ -223,15 +227,16 @@ app.post('/webhook/tradingview',
                     }
                     
                     // Use indicator stop loss/take profit if available
-                    if (indicatorMatch.stopLoss && !orderIntent.stopLoss) {
+                    // Override defaults with indicator values (indicators are more sophisticated than simple defaults)
+                    if (indicatorMatch.stopLoss && orderIntent._stopLossWasDefault) {
                         const stopLossPrice = orderIntent.price * (1 - parseFloat(indicatorMatch.stopLoss));
                         orderIntent.stopLoss = stopLossPrice;
-                        console.log(`🎯 Using indicator stop loss: ${stopLossPrice.toFixed(2)}`);
+                        console.log(`🎯 Using indicator stop loss: ${stopLossPrice.toFixed(2)} (overriding default)`);
                     }
-                    if (indicatorMatch.takeProfit && !orderIntent.takeProfit) {
+                    if (indicatorMatch.takeProfit && orderIntent._takeProfitWasDefault) {
                         const takeProfitPrice = orderIntent.price * (1 + parseFloat(indicatorMatch.takeProfit));
                         orderIntent.takeProfit = takeProfitPrice;
-                        console.log(`🎯 Using indicator take profit: ${takeProfitPrice.toFixed(2)}`);
+                        console.log(`🎯 Using indicator take profit: ${takeProfitPrice.toFixed(2)} (overriding default)`);
                     }
                 }
             } catch (indError) {
@@ -643,7 +648,102 @@ app.get('/api/patterns', (req, res) => {
     }
 });
 
-// Get pattern by ID
+// Get pattern statistics (MUST be before /api/patterns/:id to avoid route shadowing)
+app.get('/api/patterns/stats', async (req, res) => {
+    try {
+        const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
+        const patternStats = patternRecognitionService.getStats();
+        const allPatterns = Array.from(patternRecognitionService.patterns.values());
+        
+        // Count by symbol
+        const bySymbol = {};
+        const byTimeframe = {};
+        
+        for (const pattern of allPatterns) {
+            // Count by symbol
+            const symbol = pattern.symbol || 'unknown';
+            bySymbol[symbol] = (bySymbol[symbol] || 0) + 1;
+            
+            // Count by timeframe
+            const timeframe = pattern.timeframe || 'unknown';
+            byTimeframe[timeframe] = (byTimeframe[timeframe] || 0) + 1;
+        }
+        
+        // Determine storage mode
+        const driveEnabled = process.env.ENABLE_GOOGLE_DRIVE_SYNC === 'true';
+        const hasCredentials = !!(
+            process.env.GOOGLE_DRIVE_CLIENT_ID &&
+            process.env.GOOGLE_DRIVE_CLIENT_SECRET &&
+            process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+        );
+        
+        let storageMode = 'LOCAL_ONLY';
+        let googleDriveEnabled = false;
+        let driveReason = null;
+        
+        if (driveEnabled && hasCredentials) {
+            // Check if Drive is actually connected
+            if (googleDriveStorage.drive !== null) {
+                storageMode = 'GOOGLE_DRIVE_PRIMARY';
+                googleDriveEnabled = true;
+            } else {
+                storageMode = 'LOCAL_ONLY';
+                googleDriveEnabled = false;
+                driveReason = 'Drive credentials configured but not connected (check initialization)';
+            }
+        } else if (driveEnabled && !hasCredentials) {
+            storageMode = 'LOCAL_ONLY';
+            googleDriveEnabled = false;
+            driveReason = 'ENABLE_GOOGLE_DRIVE_SYNC=true but missing credentials (GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)';
+        } else {
+            storageMode = 'LOCAL_ONLY';
+            googleDriveEnabled = false;
+            driveReason = 'ENABLE_GOOGLE_DRIVE_SYNC not set to true';
+        }
+        
+        // Get last sync time from Google Drive storage if available
+        const fs = require('fs').promises;
+        const path = require('path');
+        let lastSyncAt = null;
+        let lastSavedAt = null;
+        if (googleDriveStorage && googleDriveStorage.lastSyncAt) {
+            lastSyncAt = googleDriveStorage.lastSyncAt;
+            lastSavedAt = googleDriveStorage.lastSyncAt;
+        } else {
+            // Try to get from pattern file mtime
+            try {
+                const patternFile = path.join(__dirname, 'data/patterns.json');
+                const stats = await fs.stat(patternFile);
+                lastSavedAt = stats.mtime.toISOString();
+            } catch (e) {
+                // File doesn't exist
+            }
+        }
+        
+        res.json({
+            success: true,
+            totalPatterns: patternStats.totalPatterns || patternRecognitionService.patterns.size,
+            bySymbol: bySymbol,
+            byTimeframe: byTimeframe,
+            storageMode: storageMode,
+            googleDriveEnabled: googleDriveEnabled,
+            lastSyncAt: lastSyncAt,
+            lastSavedAt: lastSavedAt,
+            driveReason: driveReason,
+            patternsByType: patternStats.patternsByType,
+            avgConfidence: patternStats.avgConfidence,
+            avgWinRate: patternStats.avgWinRate
+        });
+    } catch (error) {
+        console.error('❌ Error getting pattern stats:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get pattern by ID (must be after /api/patterns/stats to avoid route shadowing)
 app.get('/api/patterns/:id', (req, res) => {
     try {
         const pattern = patternRecognitionService.patterns.get(req.params.id);
@@ -954,26 +1054,6 @@ app.get('/api/patterns/opening/:timeframe', (req, res) => {
     }
 });
 
-// Get pattern statistics
-app.get('/api/patterns/stats', (req, res) => {
-    try {
-        const stats = patternRecognitionService.getStats();
-        const agentStats = patternLearningAgents.getAllAgentPerformance();
-        
-        res.json({
-            success: true,
-            patternStats: stats,
-            agentStats: agentStats
-        });
-    } catch (error) {
-        console.error('❌ Error getting pattern stats:', error.message);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
 // Match current market to patterns
 app.post('/api/patterns/match', async (req, res) => {
     try {
@@ -1083,41 +1163,252 @@ app.get('/learn/health', async (req, res) => {
 // Learning status (detailed)
 app.get('/learn/status', async (req, res) => {
     try {
+        const fs = require('fs').promises;
+        const path = require('path');
         const daemon = new learningDaemon();
-        const status = daemon.getStatus();
+        const status = await daemon.getStatus(); // Now async
         const engineStats = patternLearningEngine.getStats();
         const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
+        const universeLoader = require('./backend/services/universeLoader');
+        
+        // Read heartbeat file for accurate daemon status
+        const heartbeatPath = path.join(__dirname, 'data/learning/heartbeat.json');
+        let heartbeat = null;
+        let daemonPid = null;
+        let daemonStartedAt = null;
+        let lastCycleAt = null;
+        let isRunning = false;
+        
+        try {
+            const heartbeatContent = await fs.readFile(heartbeatPath, 'utf8');
+            heartbeat = JSON.parse(heartbeatContent);
+            daemonPid = heartbeat.pid;
+            daemonStartedAt = heartbeat.startedAt;
+            lastCycleAt = heartbeat.lastCycleAt;
+            
+            // Check if PID is actually running using process.kill(pid, 0)
+            if (daemonPid) {
+                try {
+                    process.kill(daemonPid, 0); // Signal 0 checks if process exists
+                    isRunning = true;
+                } catch (e) {
+                    // Process not running (ESRCH = no such process)
+                    isRunning = false;
+                }
+            }
+        } catch (e) {
+            // Heartbeat file doesn't exist - try PID file as fallback
+            const pidFile = path.join(__dirname, 'data/pids/learning.pid');
+            try {
+                const pidContent = await fs.readFile(pidFile, 'utf8');
+                daemonPid = parseInt(pidContent.trim(), 10);
+                if (daemonPid) {
+                    try {
+                        process.kill(daemonPid, 0); // Signal 0 checks if process exists
+                        isRunning = true;
+                    } catch (e) {
+                        // Process not running
+                        isRunning = false;
+                    }
+                }
+            } catch (e2) {
+                // Neither heartbeat nor PID file exists
+            }
+        }
+        
+        // Use heartbeat data if available
+        if (heartbeat) {
+            lastCycleAt = heartbeat.lastCycleAt;
+            if (heartbeat.lastError) {
+                status.lastError = heartbeat.lastError;
+            }
+        }
+        
+        // Count errors from engine stats or heartbeat
+        let errorCount = 0;
+        if (heartbeat && heartbeat.errorCount !== undefined) {
+            errorCount = heartbeat.errorCount;
+        } else if (engineStats.errors && Array.isArray(engineStats.errors)) {
+            errorCount = engineStats.errors.length;
+        }
+        
+        // Load universe info
+        let universeInfo = { symbolsCount: 0, timeframesCount: 0, pairsCount: 0 };
+        try {
+            await universeLoader.load();
+            const pairs = universeLoader.getSymbolTimeframePairs();
+            const symbols = new Set(pairs.map(p => p.symbol));
+            const timeframes = new Set(pairs.map(p => p.timeframe));
+            universeInfo = {
+                symbolsCount: symbols.size,
+                timeframesCount: timeframes.size,
+                pairsCount: pairs.length
+            };
+        } catch (e) {
+            // Universe not loaded
+        }
+        
+        // Determine storage info
+        const driveEnabled = process.env.ENABLE_GOOGLE_DRIVE_SYNC === 'true';
+        const hasCredentials = !!(
+            process.env.GOOGLE_DRIVE_CLIENT_ID &&
+            process.env.GOOGLE_DRIVE_CLIENT_SECRET &&
+            process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+        );
+        
+        let storageMode = 'LOCAL_ONLY';
+        let driveReason = null;
+        
+        if (driveEnabled && hasCredentials) {
+            if (googleDriveStorage.drive !== null) {
+                storageMode = 'GOOGLE_DRIVE_PRIMARY';
+            } else {
+                storageMode = 'LOCAL_ONLY';
+                driveReason = 'Drive credentials configured but not connected (check initialization)';
+            }
+        } else if (driveEnabled && !hasCredentials) {
+            storageMode = 'LOCAL_ONLY';
+            driveReason = 'ENABLE_GOOGLE_DRIVE_SYNC=true but missing credentials (GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN)';
+        } else {
+            storageMode = 'LOCAL_ONLY';
+            driveReason = 'ENABLE_GOOGLE_DRIVE_SYNC not set to true';
+        }
+        
+        // Get pattern source
+        let patternSource = 'local';
+        if (storageMode === 'GOOGLE_DRIVE_PRIMARY') {
+            patternSource = 'drive';
+        }
+        
+        // Get last saved timestamp
+        let lastSavedAt = null;
+        if (googleDriveStorage.lastSyncAt) {
+            lastSavedAt = googleDriveStorage.lastSyncAt;
+        } else {
+            // Try to get from pattern file mtime
+            try {
+                const patternFile = path.join(__dirname, 'data/patterns.json');
+                const stats = await fs.stat(patternFile);
+                lastSavedAt = stats.mtime.toISOString();
+            } catch (e) {
+                // File doesn't exist
+            }
+        }
         
         const detailedStatus = {
             timestamp: new Date().toISOString(),
             daemon: {
+                running: isRunning, // Use PID liveness check result (authoritative)
+                pid: daemonPid,
+                startedAt: daemonStartedAt || heartbeat?.startedAt,
+                lastCycleAt: lastCycleAt || heartbeat?.lastCycleAt || status.lastRun,
+                errorCount: errorCount,
+                lastError: heartbeat?.lastError || status.lastError,
                 enabled: status.enabled,
-                isRunning: status.isRunning,
                 intervalMinutes: status.intervalMinutes,
                 concurrency: status.concurrency,
                 queueDepth: status.queueDepth,
                 processing: status.processing,
-                lastRun: status.lastRun
+                heartbeat: heartbeat ? {
+                    candlesProcessed: heartbeat.candlesProcessed,
+                    patternsFound: heartbeat.patternsFound,
+                    patternsTotal: heartbeat.patternsTotal,
+                    patternsExtracted: heartbeat.patternsExtracted,
+                    patternsDeduped: heartbeat.patternsDeduped,
+                    storageMode: heartbeat.storageMode,
+                    googleDriveEnabled: heartbeat.googleDriveEnabled,
+                    errorCount: heartbeat.errorCount,
+                    lastError: heartbeat.lastError,
+                    timestamp: heartbeat.timestamp
+                } : null
             },
+            patterns: {
+                total: engineStats.totalPatterns || patternRecognitionService.patterns.size,
+                lastSavedAt: lastSavedAt,
+                source: patternSource
+            },
+            storage: {
+                googleDriveEnabled: storageMode === 'GOOGLE_DRIVE_PRIMARY',
+                driveFolder: googleDriveStorage.folderId || null,
+                cachePath: path.join(__dirname, 'data/patterns.json'),
+                mode: storageMode,
+                reason: driveReason
+            },
+            universe: universeInfo,
             engine: {
-                enabled: engineStats.enabled,
-                totalPatterns: engineStats.totalPatterns,
-                patternsExtracted: engineStats.patternsExtracted,
-                patternsDeduped: engineStats.patternsDeduped,
-                symbolsProcessed: engineStats.symbolsProcessed,
+                enabled: engineStats.enabled !== false,
+                patternsExtracted: engineStats.patternsExtracted || 0,
+                patternsDeduped: engineStats.patternsDeduped || 0,
+                symbolsProcessed: engineStats.symbolsProcessed || 0,
                 lastRun: engineStats.lastRun
             },
-            googleDrive: {
-                enabled: googleDriveStorage.enabled,
-                connected: googleDriveStorage.drive !== null,
-                folderId: googleDriveStorage.folderId
-            },
-            errors: engineStats.errors.slice(-5) // Last 5 errors
+            errors: (engineStats.errors || []).slice(-5) // Last 5 errors
         };
 
         res.json(detailedStatus);
     } catch (error) {
         console.error('❌ Error getting learning status:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Storage status endpoint
+app.get('/learn/storage/status', async (req, res) => {
+    try {
+        const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
+        const status = googleDriveStorage.getStatus();
+        
+        res.json({
+            timestamp: new Date().toISOString(),
+            ...status
+        });
+    } catch (error) {
+        console.error('❌ Error getting storage status:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Backfill status endpoint
+app.get('/learn/backfill/status', async (req, res) => {
+    try {
+        const fs = require('fs').promises;
+        const path = require('path');
+        const checkpointDir = path.join(__dirname, 'data/checkpoints');
+        
+        // Read checkpoint files to determine backfill progress
+        let checkpoints = {};
+        try {
+            const files = await fs.readdir(checkpointDir);
+            for (const file of files) {
+                if (file.endsWith('.json')) {
+                    const checkpointPath = path.join(checkpointDir, file);
+                    const content = await fs.readFile(checkpointPath, 'utf8');
+                    const checkpoint = JSON.parse(content);
+                    const key = file.replace('.json', '');
+                    checkpoints[key] = {
+                        lastProcessed: checkpoint.lastProcessed || null,
+                        lastCandleTime: checkpoint.lastCandleTime || null,
+                        totalProcessed: checkpoint.totalProcessed || 0
+                    };
+                }
+            }
+        } catch (e) {
+            // Checkpoint directory doesn't exist or empty
+        }
+        
+        res.json({
+            timestamp: new Date().toISOString(),
+            checkpoints: checkpoints,
+            totalCheckpoints: Object.keys(checkpoints).length
+        });
+    } catch (error) {
+        console.error('❌ Error getting backfill status:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
@@ -1236,6 +1527,24 @@ app.get('/', (req, res) => {
 
 // Start server
 app.listen(port, async () => {
+    // Fast-fail check for Google Drive if enabled
+    if (process.env.ENABLE_GOOGLE_DRIVE_SYNC === 'true') {
+        const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
+        try {
+            // If enabled but not initialized, try to initialize
+            if (!googleDriveStorage.connected && googleDriveStorage.enabled) {
+                await googleDriveStorage.initialize();
+            }
+            if (googleDriveStorage.enabled && !googleDriveStorage.connected) {
+                console.error(`❌ FATAL: Google Drive enabled but not connected. Check credentials.`);
+                console.error(`   Error: ${googleDriveStorage.lastError || 'Unknown error'}`);
+                process.exit(1);
+            }
+        } catch (error) {
+            console.error(`❌ FATAL: Google Drive initialization failed: ${error.message}`);
+            process.exit(1);
+        }
+    }
     console.log(`🎯 Secure TradingView Webhook Server started on port ${port}`);
     console.log(`📡 TradingView webhook URL: http://localhost:${port}/webhook/tradingview`);
     console.log(`🏥 Health check: http://localhost:${port}/health`);
@@ -1303,6 +1612,14 @@ app.listen(port, async () => {
         } catch (error) {
             console.warn(`⚠️  Automated trading start failed: ${error.message}`);
         }
+    }
+    
+    // Ensure patterns are loaded
+    try {
+        await patternRecognitionService.loadPatterns();
+        console.log(`📊 Pattern Recognition: Loaded ${patternRecognitionService.patterns.size} patterns`);
+    } catch (error) {
+        console.warn(`⚠️  Pattern loading failed: ${error.message}`);
     }
 });
 

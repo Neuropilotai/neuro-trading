@@ -167,15 +167,20 @@ async function webhookAuth(req, res, next) {
       } else {
         // Body secret invalid
         console.warn(`⚠️  Invalid body secret from ${req.ip}`);
-        // Record failed auth attempt
+        // Record failed auth attempt (await to ensure it's recorded)
         const tradingViewTelemetry = require('../services/tradingViewTelemetry');
-        tradingViewTelemetry.recordWebhook({
-          remoteIp: req.ip || req.connection?.remoteAddress,
-          userAgent: req.get('user-agent'),
-          authModeUsed: 'body_secret',
-          result: '401',
-          httpStatus: 401
-        }).catch(() => {}); // Don't block on telemetry errors
+        try {
+          await tradingViewTelemetry.recordWebhook({
+            remoteIp: req.ip || req.connection?.remoteAddress,
+            userAgent: req.get('user-agent'),
+            authModeUsed: 'body_secret',
+            result: '401',
+            httpStatus: 401
+          });
+        } catch (telemetryError) {
+          // Log but don't block response if telemetry fails
+          console.warn('⚠️  Failed to record auth telemetry:', telemetryError.message);
+        }
         return res.status(401).json({
           error: 'Unauthorized',
           message: 'Invalid secret'
@@ -192,15 +197,20 @@ async function webhookAuth(req, res, next) {
   }
 
   // No authentication method provided
-  // Record failed auth attempt
+  // Record failed auth attempt (await to ensure it's recorded)
   const tradingViewTelemetry = require('../services/tradingViewTelemetry');
-  tradingViewTelemetry.recordWebhook({
-    remoteIp: req.ip || req.connection?.remoteAddress,
-    userAgent: req.get('user-agent'),
-    authModeUsed: 'none',
-    result: '401',
-    httpStatus: 401
-  }).catch(() => {}); // Don't block on telemetry errors
+  try {
+    await tradingViewTelemetry.recordWebhook({
+      remoteIp: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+      authModeUsed: 'none',
+      result: '401',
+      httpStatus: 401
+    });
+  } catch (telemetryError) {
+    // Log but don't block response if telemetry fails
+    console.warn('⚠️  Failed to record auth telemetry:', telemetryError.message);
+  }
   
   return res.status(401).json({
     error: 'Unauthorized',

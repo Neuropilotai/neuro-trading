@@ -17,13 +17,16 @@ class RiskEngine {
     this.requireStopLoss = process.env.REQUIRE_STOP_LOSS !== 'false';
     this.requireTakeProfit = process.env.REQUIRE_TAKE_PROFIT === 'true'; // Optional by default
 
-    // Daily tracking (in-memory, should be persisted in production)
+    // Daily tracking (persisted to database)
     this.dailyStats = {
       date: this.getToday(),
       totalPnL: 0,
       tradeCount: 0,
       openPositions: new Map() // symbol -> {quantity, avgPrice}
     };
+    
+    // Load today's stats from database if available
+    this.loadDailyStats();
 
     // Reset daily stats at midnight
     this.scheduleDailyReset();
@@ -39,9 +42,12 @@ class RiskEngine {
   /**
    * Reset daily stats if it's a new day
    */
-  checkDailyReset() {
+  async checkDailyReset() {
     const today = this.getToday();
     if (this.dailyStats.date !== today) {
+      // Save yesterday's stats before resetting
+      await this.saveDailyStats();
+      
       console.log(`📅 New trading day: ${today}. Resetting daily stats.`);
       this.dailyStats = {
         date: today,
@@ -49,6 +55,70 @@ class RiskEngine {
         tradeCount: 0,
         openPositions: new Map()
       };
+    }
+  }
+
+  /**
+   * Load daily stats from database
+   */
+  async loadDailyStats() {
+    try {
+      const evaluationDb = require('../db/evaluationDb');
+      await evaluationDb.initialize();
+      
+      const today = this.getToday();
+      return new Promise((resolve, reject) => {
+        evaluationDb.db.get(
+          'SELECT * FROM daily_risk_stats WHERE date = ?',
+          [today],
+          (err, stats) => {
+            if (err) {
+              console.warn('⚠️  Could not load daily stats from database:', err.message);
+              resolve();
+              return;
+            }
+            
+            if (stats) {
+              this.dailyStats = {
+                date: stats.date,
+                totalPnL: stats.daily_pnl,
+                tradeCount: stats.trade_count,
+                openPositions: new Map() // Positions not persisted (reconstructed from trades)
+              };
+            }
+            resolve();
+          }
+        );
+      });
+    } catch (error) {
+      // Database not available or table doesn't exist yet - use defaults
+      console.warn('⚠️  Could not load daily stats from database:', error.message);
+    }
+  }
+
+  /**
+   * Save daily stats to database
+   */
+  async saveDailyStats() {
+    try {
+      const evaluationDb = require('../db/evaluationDb');
+      await evaluationDb.initialize();
+      
+      const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
+      const dailyPnLPct = accountBalance > 0 ? (this.dailyStats.totalPnL / accountBalance) * 100 : 0;
+      
+      await evaluationDb.saveDailyRiskStats({
+        date: this.dailyStats.date,
+        accountBalance: accountBalance + this.dailyStats.totalPnL,
+        dailyPnL: this.dailyStats.totalPnL,
+        dailyPnLPct,
+        tradeCount: this.dailyStats.tradeCount,
+        openPositionsCount: this.dailyStats.openPositions.size,
+        maxDrawdownPct: 0, // TODO: Calculate from equity curve
+        riskLimitBreaches: 0 // TODO: Track breaches
+      });
+    } catch (error) {
+      console.warn('⚠️  Could not save daily stats to database:', error.message);
     }
   }
 
@@ -63,10 +133,10 @@ class RiskEngine {
     
     const msUntilMidnight = tomorrow - now;
     
-    setTimeout(() => {
-      this.checkDailyReset();
+    setTimeout(async () => {
+      await this.checkDailyReset();
       // Schedule next reset (24 hours)
-      setInterval(() => this.checkDailyReset(), 24 * 60 * 60 * 1000);
+      setInterval(async () => await this.checkDailyReset(), 24 * 60 * 60 * 1000);
     }, msUntilMidnight);
   }
 
@@ -98,7 +168,7 @@ class RiskEngine {
     }
 
     // Reset daily stats if needed
-    this.checkDailyReset();
+    await this.checkDailyReset();
 
     // Check daily loss limit
     const dailyLossPercent = (Math.abs(this.dailyStats.totalPnL) / accountBalance) * 100;
@@ -110,12 +180,17 @@ class RiskEngine {
     }
 
     // Check position size limit
-    const positionValue = orderIntent.quantity * orderIntent.price;
-    const positionPercent = (positionValue / accountBalance) * 100;
-    if (positionPercent > this.maxPositionSizePercent) {
+    // Calculate notional value: abs(quantity) * price
+    const notional = Math.abs(orderIntent.quantity) * orderIntent.price;
+    // Use accountBalance as equity (prefer totalValue if available, but accountBalance is the balance)
+    const equity = accountBalance;
+    // Calculate position size as percentage: (notional / equity) * 100
+    const positionSizePercent = (notional / equity) * 100;
+    
+    if (positionSizePercent > this.maxPositionSizePercent) {
       return {
         allowed: false,
-        reason: `Position size too large: ${positionPercent.toFixed(2)}% > ${this.maxPositionSizePercent}%`
+        reason: `Position size too large: ${positionSizePercent.toFixed(2)}% > ${this.maxPositionSizePercent}%`
       };
     }
 
@@ -165,8 +240,8 @@ class RiskEngine {
    * Record trade execution (for daily tracking)
    * @param {object} trade - Executed trade
    */
-  recordTrade(trade) {
-    this.checkDailyReset();
+  async recordTrade(trade) {
+    await this.checkDailyReset();
 
     this.dailyStats.tradeCount++;
     
@@ -192,6 +267,11 @@ class RiskEngine {
           this.dailyStats.openPositions.set(trade.symbol, { quantity: newQuantity, avgPrice: existing.avgPrice });
         }
       }
+    }
+
+    // Save stats periodically (every 10 trades)
+    if (this.dailyStats.tradeCount % 10 === 0) {
+      await this.saveDailyStats();
     }
   }
 

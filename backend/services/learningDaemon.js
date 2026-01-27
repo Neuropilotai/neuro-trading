@@ -3,6 +3,9 @@
  * Always-on learning service that processes symbols/timeframes continuously
  */
 
+// Load environment variables first
+require('dotenv').config();
+
 const { Worker, isMainThread, parentPort } = require('worker_threads');
 const universeLoader = require('./universeLoader');
 const providerFactory = require('./providerFactory');
@@ -22,6 +25,10 @@ class LearningDaemon {
     this.queue = [];
     this.processing = new Set();
     this.logPath = path.join(__dirname, '../../data/logs/learning.log');
+    this.lastError = null;
+    this.pidFile = path.join(__dirname, '../../data/pids/learning.pid');
+    this.heartbeatPath = path.join(__dirname, '../../data/learning/heartbeat.json');
+    this.startedAt = new Date().toISOString();
   }
 
   /**
@@ -36,6 +43,8 @@ class LearningDaemon {
     try {
       // Ensure log directory exists
       await fs.mkdir(path.dirname(this.logPath), { recursive: true });
+      // Ensure heartbeat directory exists
+      await fs.mkdir(path.dirname(this.heartbeatPath), { recursive: true });
 
       // Initialize engine
       await patternLearningEngine.initialize();
@@ -46,9 +55,19 @@ class LearningDaemon {
       // Load universe
       await universeLoader.load();
 
+      // Write initial heartbeat on startup
+      await this.writeHeartbeat({ candlesProcessed: 0, patterns: 0 });
+
       console.log(`✅ Learning daemon initialized (interval: ${this.intervalMinutes}min, concurrency: ${this.concurrency})`);
     } catch (error) {
       console.error('❌ Error initializing learning daemon:', error.message);
+      // Write heartbeat even on initialization error
+      this.lastError = {
+        timestamp: new Date().toISOString(),
+        message: error.message,
+        stack: error.stack
+      };
+      await this.writeHeartbeat({ candlesProcessed: 0, patterns: 0 });
       throw error;
     }
   }
@@ -69,6 +88,9 @@ class LearningDaemon {
 
     this.isRunning = true;
     this.log('INFO', 'Learning daemon started');
+    
+    // Write heartbeat on start
+    await this.writeHeartbeat({ candlesProcessed: 0, patterns: 0 });
 
     // Run immediately
     await this.runCycle();
@@ -98,11 +120,47 @@ class LearningDaemon {
   }
 
   /**
+   * Write heartbeat file (atomic write via temp file)
+   */
+  async writeHeartbeat(cycleData = {}) {
+    try {
+      const googleDriveStorage = require('./googleDrivePatternStorage');
+      const engineStats = patternLearningEngine.getStats();
+      
+      const heartbeat = {
+        pid: process.pid,
+        startedAt: this.startedAt,
+        lastCycleAt: patternLearningEngine.stats.lastRun || new Date().toISOString(),
+        candlesProcessed: cycleData.candlesProcessed || 0,
+        patternsFound: cycleData.patterns || 0,
+        patternsTotal: patternLearningEngine.patterns.size || 0,
+        patternsExtracted: engineStats.patternsExtracted || 0,
+        patternsDeduped: engineStats.patternsDeduped || 0,
+        storageMode: googleDriveStorage.enabled && googleDriveStorage.connected ? 'GOOGLE_DRIVE_PRIMARY' : 'LOCAL_CACHE',
+        googleDriveEnabled: googleDriveStorage.enabled && googleDriveStorage.connected,
+        errorCount: engineStats.errors ? engineStats.errors.length : 0,
+        lastError: this.lastError,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Atomic write: write to temp file then rename
+      const tempPath = `${this.heartbeatPath}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(heartbeat, null, 2), 'utf8');
+      await fs.rename(tempPath, this.heartbeatPath);
+    } catch (error) {
+      // Don't fail cycle if heartbeat write fails
+      console.warn('⚠️  Failed to write heartbeat:', error.message);
+    }
+  }
+
+  /**
    * Run one learning cycle
    */
   async runCycle() {
     if (!this.isRunning) return;
 
+    let cycleData = { candlesProcessed: 0, patterns: 0, missingCsvs: [] };
+    
     try {
       this.log('INFO', 'Starting learning cycle');
       const startTime = Date.now();
@@ -112,6 +170,17 @@ class LearningDaemon {
       
       // Process with concurrency limit
       const results = await this.processWithConcurrency(pairs, this.concurrency);
+      
+      // Collect missing CSV files (summarize once per cycle)
+      const missingCsvs = results
+        .filter(r => r.reason === 'no_data_available' && r.provider === 'local_csv')
+        .map(r => `${r.symbol}_${r.timeframe}.csv`);
+      
+      if (missingCsvs.length > 0) {
+        cycleData.missingCsvs = missingCsvs;
+        const uniqueMissing = [...new Set(missingCsvs)];
+        this.log('WARN', `Missing CSV files (${uniqueMissing.length}): ${uniqueMissing.slice(0, 5).join(', ')}${uniqueMissing.length > 5 ? '...' : ''}`);
+      }
 
       // Save patterns
       await patternLearningEngine.savePatterns();
@@ -123,14 +192,30 @@ class LearningDaemon {
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       const totalProcessed = results.reduce((sum, r) => sum + r.processed, 0);
       const totalPatterns = results.reduce((sum, r) => sum + r.patterns, 0);
+      
+      cycleData = { candlesProcessed: totalProcessed, patterns: totalPatterns, missingCsvs: cycleData.missingCsvs };
 
       this.log('INFO', `Cycle complete: ${totalProcessed} candles, ${totalPatterns} patterns in ${duration}s`);
       console.log(`✅ Learning cycle complete: ${totalProcessed} candles, ${totalPatterns} patterns`);
+      
+      // Write heartbeat on success
+      await this.writeHeartbeat(cycleData);
+      this.lastError = null; // Clear error on success
 
       return results;
     } catch (error) {
-      this.log('ERROR', `Cycle failed: ${error.message}`);
+      const errorMsg = `Cycle failed: ${error.message}`;
+      this.log('ERROR', errorMsg);
+      this.lastError = {
+        timestamp: new Date().toISOString(),
+        message: error.message,
+        stack: error.stack
+      };
       console.error('❌ Learning cycle error:', error.message);
+      
+      // Write heartbeat even on error
+      await this.writeHeartbeat(cycleData);
+      
       throw error;
     }
   }
@@ -181,7 +266,7 @@ class LearningDaemon {
         maxBars
       );
 
-      return { symbol, timeframe, ...result };
+      return { symbol, timeframe, provider: metadata.provider || 'unknown', ...result };
     } catch (error) {
       this.log('ERROR', `${symbol}/${timeframe}: ${error.message}`);
       return { symbol, timeframe, processed: 0, patterns: 0, error: error.message };
@@ -209,16 +294,46 @@ class LearningDaemon {
 
   /**
    * Get daemon status
+   * Checks PID file to determine if daemon process is actually running
    */
-  getStatus() {
+  async getStatus() {
+    // Check if daemon process is actually running by checking PID file
+    let processRunning = false;
+    try {
+      const pidContent = await fs.readFile(this.pidFile, 'utf8');
+      const pid = parseInt(pidContent.trim(), 10);
+      if (pid) {
+        // Check if process exists
+        try {
+          const { execSync } = require('child_process');
+          execSync(`ps -p ${pid} > /dev/null 2>&1`, { timeout: 500 });
+          processRunning = true;
+        } catch (e) {
+          // Process not running - stale PID file
+          processRunning = false;
+        }
+      }
+    } catch (e) {
+      // PID file doesn't exist or can't be read
+      processRunning = false;
+    }
+    
+    // If PID file says running but isRunning is false, update it
+    if (processRunning && !this.isRunning) {
+      this.isRunning = true;
+    } else if (!processRunning && this.isRunning) {
+      this.isRunning = false;
+    }
+    
     return {
       enabled: this.enabled,
-      isRunning: this.isRunning,
+      isRunning: this.isRunning || processRunning,
       intervalMinutes: this.intervalMinutes,
       concurrency: this.concurrency,
       queueDepth: this.queue.length,
       processing: Array.from(this.processing),
       lastRun: patternLearningEngine.stats.lastRun,
+      lastError: this.lastError,
       stats: patternLearningEngine.getStats()
     };
   }

@@ -7,10 +7,20 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const evaluationDb = require('../db/evaluationDb');
+const patternAttributionService = require('./patternAttributionService');
 
 class PatternRecognitionService {
   constructor() {
     this.enabled = process.env.ENABLE_PATTERN_RECOGNITION !== 'false';
+    
+    // Pattern filtering config (from env vars with safe defaults)
+    this.filteringEnabled = process.env.ENABLE_PATTERN_FILTERING !== 'false';
+    this.filterConfig = {
+      minWinRate: parseFloat(process.env.PATTERN_MIN_WIN_RATE) || 0.50,
+      minProfitFactor: parseFloat(process.env.PATTERN_MIN_PROFIT_FACTOR) || 1.0,
+      minSampleSize: parseInt(process.env.PATTERN_MIN_SAMPLE_SIZE) || 10
+    };
     
     // Pattern storage
     this.patterns = new Map(); // patternId -> pattern
@@ -76,7 +86,10 @@ class PatternRecognitionService {
       // Match against known patterns
       const matchedPatterns = await this.matchKnownPatterns(symbol, history, detectedPatterns);
       
-      return matchedPatterns;
+      // Filter patterns by performance if enabled
+      const validatedPatterns = await this.filterByPerformance(matchedPatterns);
+      
+      return validatedPatterns;
     } catch (error) {
       console.error(`❌ Pattern detection error for ${symbol}:`, error.message);
       return [];
@@ -333,16 +346,77 @@ class PatternRecognitionService {
           ...detected,
           confidence: boostedConfidence,
           matchedPattern: bestMatch.patternId,
+          patternId: bestMatch.patternId, // Add patternId for filtering
           historicalWinRate: bestMatch.winRate,
           historicalAvgPnL: bestMatch.avgPnL
         });
       } else {
-        // New pattern - add with base confidence
+        // New pattern - add with base confidence (no patternId yet)
         matchedPatterns.push(detected);
       }
     }
 
     return matchedPatterns;
+  }
+
+  /**
+   * Filter patterns by performance metrics
+   * Only returns patterns that meet minimum thresholds
+   */
+  async filterByPerformance(patterns) {
+    // If filtering is disabled, return all patterns (backward compatible)
+    if (!this.filteringEnabled) {
+      return patterns;
+    }
+
+    // Collect pattern IDs from matched patterns
+    const patternIds = patterns
+      .map(p => p.patternId || p.matchedPattern)
+      .filter(id => id !== undefined && id !== null);
+
+    if (patternIds.length === 0) {
+      // No pattern IDs means new patterns - return all (they'll be validated after first trade)
+      return patterns;
+    }
+
+    try {
+      // Get validated pattern IDs from database
+      const validatedIds = await evaluationDb.getValidatedPatterns(this.filterConfig);
+      const validatedSet = new Set(validatedIds);
+
+      // Filter patterns - keep only validated ones
+      const filtered = [];
+      const filteredOut = [];
+
+      for (const pattern of patterns) {
+        const patternId = pattern.patternId || pattern.matchedPattern;
+        
+        // If pattern has no ID yet (new pattern), include it
+        // It will be validated after first trade
+        if (!patternId) {
+          filtered.push(pattern);
+          continue;
+        }
+
+        // Check if pattern is validated
+        if (validatedSet.has(patternId)) {
+          filtered.push(pattern);
+        } else {
+          filteredOut.push(patternId);
+        }
+      }
+
+      // Log filtered patterns at debug level only
+      if (filteredOut.length > 0) {
+        console.debug(`🔍 Pattern filtering: ${filteredOut.length} pattern(s) filtered out (insufficient performance)`);
+      }
+
+      return filtered;
+    } catch (error) {
+      console.error('❌ Error filtering patterns by performance:', error.message);
+      // On error, return all patterns (fail-safe)
+      return patterns;
+    }
   }
 
   /**

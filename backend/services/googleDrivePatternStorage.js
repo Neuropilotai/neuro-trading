@@ -21,6 +21,9 @@ class GoogleDrivePatternStorage {
     this.drive = null;
     this.syncInterval = null;
     this.syncIntervalMs = 5 * 60 * 1000; // 5 minutes
+    this.lastSyncAt = null;
+    this.lastError = null;
+    this.connected = false;
     
     if (this.enabled) {
       this.initialize();
@@ -29,6 +32,7 @@ class GoogleDrivePatternStorage {
 
   /**
    * Initialize Google Drive client
+   * Fast-fail if enabled but credentials missing
    */
   async initialize() {
     if (!this.enabled) {
@@ -36,10 +40,13 @@ class GoogleDrivePatternStorage {
       return;
     }
 
+    // Fast-fail check: if enabled, credentials must be present
     if (!this.clientId || !this.clientSecret || !this.refreshToken) {
-      console.warn('⚠️  Google Drive credentials not configured. Set GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN');
+      const errorMsg = 'ENABLE_GOOGLE_DRIVE_SYNC=true but missing credentials. Required: GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN';
+      console.error(`❌ ${errorMsg}`);
+      this.lastError = errorMsg;
       this.enabled = false;
-      return;
+      throw new Error(errorMsg);
     }
 
     try {
@@ -64,10 +71,16 @@ class GoogleDrivePatternStorage {
       // Start periodic sync
       this.startPeriodicSync();
 
+      this.connected = true;
+      this.lastError = null;
       console.log('✅ Google Drive pattern storage initialized');
     } catch (error) {
-      console.error('❌ Google Drive initialization error:', error.message);
+      const errorMsg = `Google Drive initialization failed: ${error.message}`;
+      console.error(`❌ ${errorMsg}`);
+      this.lastError = errorMsg;
+      this.connected = false;
       this.enabled = false;
+      throw error; // Re-throw for fast-fail behavior
     }
   }
 
@@ -246,6 +259,19 @@ class GoogleDrivePatternStorage {
   /**
    * Sync all patterns to Google Drive (primary storage)
    */
+  /**
+   * Get storage status
+   */
+  getStatus() {
+    return {
+      enabled: this.enabled,
+      connected: this.connected && this.drive !== null,
+      folderId: this.folderId,
+      lastSyncAt: this.lastSyncAt,
+      lastError: this.lastError
+    };
+  }
+
   async syncToDrive(patterns) {
     if (!this.enabled || !this.drive) {
       return { success: false, reason: 'Google Drive sync disabled' };
@@ -321,6 +347,9 @@ class GoogleDrivePatternStorage {
 
       console.log(`✅ Synced ${uploaded} patterns + ${updated} bank file to Google Drive (${failed} failed)`);
       
+      this.lastSyncAt = new Date().toISOString();
+      this.lastError = null;
+      
       return {
         success: true,
         uploaded: uploaded + updated,
@@ -328,7 +357,9 @@ class GoogleDrivePatternStorage {
         total: patterns.length
       };
     } catch (error) {
-      console.error('❌ Error syncing to Google Drive:', error.message);
+      const errorMsg = `Error syncing to Google Drive: ${error.message}`;
+      console.error(`❌ ${errorMsg}`);
+      this.lastError = errorMsg;
       return {
         success: false,
         error: error.message
@@ -347,13 +378,18 @@ class GoogleDrivePatternStorage {
     try {
       const patterns = await this.downloadPatterns();
       
+      this.lastSyncAt = new Date().toISOString();
+      this.lastError = null;
+      
       return {
         success: true,
         patterns: patterns,
         count: patterns.length
       };
     } catch (error) {
-      console.error('❌ Error syncing from Google Drive:', error.message);
+      const errorMsg = `Error syncing from Google Drive: ${error.message}`;
+      console.error(`❌ ${errorMsg}`);
+      this.lastError = errorMsg;
       return {
         success: false,
         error: error.message

@@ -22,7 +22,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-LOCAL_URL="http://localhost:3014"
+# Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
+LOCAL_PORT="${PORT:-${WEBHOOK_PORT:-3014}}"
+LOCAL_URL="http://localhost:${LOCAL_PORT}"
 SECRET="${TRADINGVIEW_WEBHOOK_SECRET:-11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784}"
 PASSED=0
 FAILED=0
@@ -141,6 +143,29 @@ test_endpoint() {
 
 # Test 1: Health Check
 echo "1️⃣  Health Check"
+# Try health check, with port detection if it fails
+HEALTH_CODE=$(http_code "GET" "${LOCAL_URL}/health" "" "")
+if [ "$HEALTH_CODE" != "200" ]; then
+    # Try to detect server on other ports
+    DETECTED_PORT=""
+    for check_port in 3014 3000; do
+        if [ "$check_port" != "$LOCAL_PORT" ] && lsof -ti:${check_port} > /dev/null 2>&1; then
+            TEST_URL="http://localhost:${check_port}/health"
+            TEST_CODE=$(http_code "GET" "${TEST_URL}" "" "")
+            if [ "$TEST_CODE" = "200" ]; then
+                DETECTED_PORT="${check_port}"
+                break
+            fi
+        fi
+    done
+    
+    if [ -n "$DETECTED_PORT" ]; then
+        echo -e "${YELLOW}⚠️  Health check failed on port ${LOCAL_PORT}, but server detected on port ${DETECTED_PORT}${NC}"
+        echo -e "${BLUE}ℹ️  Updating to use port ${DETECTED_PORT}${NC}"
+        LOCAL_PORT="${DETECTED_PORT}"
+        LOCAL_URL="http://localhost:${LOCAL_PORT}"
+    fi
+fi
 test_endpoint "Health Check" "GET" "${LOCAL_URL}/health" "" "" "200" "healthy"
 echo ""
 

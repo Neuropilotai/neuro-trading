@@ -61,7 +61,7 @@ class PaperTradingService extends EventEmitter {
       await this.updateTradeLedger(tradeId, orderIntent, executionResult);
 
       // Record in risk engine
-      riskEngine.recordTrade({
+      await riskEngine.recordTrade({
         action,
         symbol,
         quantity: executionResult.filledQuantity,
