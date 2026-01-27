@@ -44,13 +44,17 @@ jobs:
       - name: Detect trading system changes
         id: detect-changes
         run: |
-          set -e
-          
           # Get list of changed files based on event type
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
             echo "PR event: comparing $BASE_REF to HEAD"
-            CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null || echo "")
+            # Verify base ref exists before diffing
+            if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
+              CHANGED_FILES=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null || echo "")
+            else
+              echo "Warning: Base ref $BASE_REF not found, using empty diff"
+              CHANGED_FILES=""
+            fi
           else
             # For push events, use before and after commits
             BEFORE="${{ github.event.before }}"
@@ -60,7 +64,13 @@ jobs:
               echo "Initial commit or invalid before SHA, checking HEAD only"
               CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
             else
-              CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || echo "")
+              # Verify commits exist before diffing
+              if git rev-parse --verify "$BEFORE" >/dev/null 2>&1 && git rev-parse --verify "$AFTER" >/dev/null 2>&1; then
+                CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || echo "")
+              else
+                echo "Warning: Commits not found, using empty diff"
+                CHANGED_FILES=""
+              fi
             fi
           fi
           
