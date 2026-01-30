@@ -137,3 +137,7 @@ backend/SNAPSHOT_WORKFLOW_GUIDE.md
 archive/legacy/scripts/test-inventory.js
 src/components/
 tests/validate_pattern_filtering.js
+
+# Trading runtime logs
+TradingDrive/
+*.log
