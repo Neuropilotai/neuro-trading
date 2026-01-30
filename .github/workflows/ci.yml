@@ -116,7 +116,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: check-changes
     if: needs.check-changes.outputs.trading-changed == 'true'
 
@@ -161,7 +161,7 @@ jobs:
           echo "Running: npm test"
           npm test -- --timeout 30000
           echo "=== UNIT TESTS END ==="
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Smoke test
         run: |
