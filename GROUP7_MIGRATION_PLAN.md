@@ -126,7 +126,7 @@ cat > Group7/.env.template << 'EOF'
 # ============================================================================
 
 # OpenAI - Script polishing
-OPENAI_API_KEY=sk-REPLACE_WITH_YOUR_OPENAI_KEY
+OPENAI_API_KEY=YOUR_OPENAI_KEY_HERE
 
 # ElevenLabs - Text-to-speech
 ELEVENLABS_API_KEY=REPLACE_WITH_YOUR_ELEVENLABS_KEY

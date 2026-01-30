@@ -289,6 +289,32 @@ class TradeLedger {
   }
 
   /**
+   * Get all FILLED trades (for state rebuild)
+   * @returns {Promise<Array>} - Array of filled trades ordered by execution time
+   */
+  async getFilledTrades() {
+    if (!this.enabled || !this.db) {
+      return [];
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT * FROM trades 
+         WHERE status = 'FILLED' 
+         ORDER BY COALESCE(filled_at, executed_at, created_at) ASC`,
+        [],
+        (err, rows) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(rows || []);
+          }
+        }
+      );
+    });
+  }
+
+  /**
    * Close database connection
    */
   close() {

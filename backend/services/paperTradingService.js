@@ -22,11 +22,15 @@ class PaperTradingService extends EventEmitter {
       positions: new Map(), // symbol -> {quantity, avgPrice, entryTime}
       dailyPnL: 0,
       totalPnL: 0,
-      trades: []
+      totalTrades: 0 // Count of executed trades (from ledger - source of truth)
     };
 
-    // Load account state from file (if exists)
-    this.loadAccountState();
+    // Environment flags
+    this.rebuildOnBoot = process.env.PAPER_STATE_REBUILD_ON_BOOT !== 'false';
+    this.resetOnBoot = process.env.PAPER_STATE_RESET_ON_BOOT === 'true';
+    
+    // Initialization flag (set to true after async init completes)
+    this.initialized = false;
 
     // Save account state periodically
     setInterval(() => this.saveAccountState(), 60000); // Every minute
@@ -135,30 +139,26 @@ class PaperTradingService extends EventEmitter {
     // Deduct from balance
     this.account.balance -= cost;
 
-    // Create execution result
-    const executionResult = {
-      action: 'BUY',
-      symbol,
-      filledQuantity: quantity,
-      fillPrice: price,
-      cost,
-      position: {
-        quantity: newQuantity,
-        avgPrice: newAvgPrice
-      },
-      stopLoss,
-      takeProfit,
-      executedAt: new Date().toISOString()
-    };
+      // Create execution result
+      const executionResult = {
+        action: 'BUY',
+        symbol,
+        filledQuantity: quantity,
+        fillPrice: price,
+        cost,
+        position: {
+          quantity: newQuantity,
+          avgPrice: newAvgPrice
+        },
+        stopLoss,
+        takeProfit,
+        executedAt: new Date().toISOString()
+      };
 
-    // Log trade
-    this.account.trades.push({
-      tradeId,
-      ...executionResult,
-      timestamp: new Date().toISOString()
-    });
+      // Increment trade count (ledger is source of truth, this is just a counter)
+      this.account.totalTrades++;
 
-    console.log(`✅ BUY executed: ${quantity} ${symbol} @ $${price.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
+      console.log(`✅ BUY executed: ${quantity} ${symbol} @ $${price.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
 
     return executionResult;
   }
@@ -197,30 +197,26 @@ class PaperTradingService extends EventEmitter {
     this.account.dailyPnL += pnl;
     this.account.totalPnL += pnl;
 
-    // Create execution result
-    const executionResult = {
-      action: 'SELL',
-      symbol,
-      filledQuantity: sellQuantity,
-      fillPrice: price,
-      proceeds,
-      costBasis,
-      pnl,
-      position: newQuantity > 0 ? {
-        quantity: newQuantity,
-        avgPrice: position.avgPrice
-      } : null,
-      executedAt: new Date().toISOString()
-    };
+      // Create execution result
+      const executionResult = {
+        action: 'SELL',
+        symbol,
+        filledQuantity: sellQuantity,
+        fillPrice: price,
+        proceeds,
+        costBasis,
+        pnl,
+        position: newQuantity > 0 ? {
+          quantity: newQuantity,
+          avgPrice: position.avgPrice
+        } : null,
+        executedAt: new Date().toISOString()
+      };
 
-    // Log trade
-    this.account.trades.push({
-      tradeId,
-      ...executionResult,
-      timestamp: new Date().toISOString()
-    });
+      // Increment trade count (ledger is source of truth, this is just a counter)
+      this.account.totalTrades++;
 
-    console.log(`✅ SELL executed: ${sellQuantity} ${symbol} @ $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
+      console.log(`✅ SELL executed: ${sellQuantity} ${symbol} @ $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
 
     return executionResult;
   }
@@ -272,9 +268,168 @@ class PaperTradingService extends EventEmitter {
         currentValue: pos.quantity * pos.avgPrice,
         unrealizedPnL: 0 // Would need current price to calculate
       })),
-      totalTrades: this.account.trades.length,
+      totalTrades: this.account.totalTrades, // Count from ledger (source of truth)
       enabled: this.enabled
     };
+  }
+
+  /**
+   * Initialize account state (rebuild from ledger or load from file)
+   */
+  async initializeState() {
+    // Check for reset flag first
+    if (this.resetOnBoot) {
+      console.warn('⚠️  DEV RESET ACTIVE: Resetting paper state to initial balance');
+      this.resetToInitialState();
+      await this.saveAccountState();
+      return;
+    }
+
+    // Try to rebuild from ledger if enabled
+    if (this.rebuildOnBoot) {
+      try {
+        const rebuilt = await this.rebuildStateFromLedger();
+        if (rebuilt) {
+          // Rebuild succeeded, state is now accurate
+          return;
+        }
+        // Rebuild failed (ledger unavailable), fall through to load from file
+      } catch (error) {
+        console.warn('⚠️  Rebuild from ledger failed, falling back to file:', error.message);
+      }
+    }
+
+    // Fallback: load from file (existing behavior)
+    await this.loadAccountState();
+  }
+
+  /**
+   * Reset account to initial state
+   */
+  resetToInitialState() {
+    const initialBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
+    this.account = {
+      balance: initialBalance,
+      initialBalance: initialBalance,
+      positions: new Map(),
+      dailyPnL: 0,
+      totalPnL: 0,
+      totalTrades: 0
+    };
+  }
+
+  /**
+   * Rebuild account state from immutable ledger
+   * @returns {Promise<boolean>} - True if rebuild succeeded, false otherwise
+   */
+  async rebuildStateFromLedger() {
+    try {
+      // Ensure ledger is initialized
+      await tradeLedger.initialize();
+      
+      // Get all FILLED trades from ledger
+      const filledTrades = await tradeLedger.getFilledTrades();
+      
+      if (filledTrades.length === 0) {
+        console.log('🔁 Rebuilt paper state: no executed trades found (clean state)');
+        this.resetToInitialState();
+        await this.saveAccountState();
+        return true;
+      }
+
+      // Start with initial balance
+      const initialBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
+      let balance = initialBalance;
+      const positions = new Map(); // symbol -> {quantity, avgPrice, entryTime, stopLoss, takeProfit}
+      let totalPnL = 0;
+      let totalTrades = 0;
+
+      // Process each trade chronologically
+      for (const trade of filledTrades) {
+        const symbol = trade.symbol;
+        const action = trade.action.toUpperCase();
+        const quantity = parseFloat(trade.quantity);
+        const price = parseFloat(trade.price);
+        const pnl = parseFloat(trade.pnl || 0);
+
+        if (action === 'BUY') {
+          // Get or create position
+          const existingPosition = positions.get(symbol) || {
+            quantity: 0,
+            avgPrice: 0,
+            entryTime: null
+          };
+
+          // Calculate new average price
+          const cost = quantity * price;
+          const newQuantity = existingPosition.quantity + quantity;
+          const newAvgPrice = existingPosition.quantity > 0
+            ? ((existingPosition.quantity * existingPosition.avgPrice) + cost) / newQuantity
+            : price;
+
+          // Update position
+          positions.set(symbol, {
+            quantity: newQuantity,
+            avgPrice: newAvgPrice,
+            entryTime: existingPosition.entryTime || trade.filled_at || trade.executed_at || trade.created_at,
+            stopLoss: trade.stop_loss || null,
+            takeProfit: trade.take_profit || null
+          });
+
+          // Deduct from balance
+          balance -= cost;
+          totalTrades++;
+        } else if (action === 'SELL' || action === 'CLOSE') {
+          const position = positions.get(symbol);
+          
+          if (!position || position.quantity === 0) {
+            console.warn(`⚠️  Ledger inconsistency: SELL for ${symbol} but no position exists`);
+            continue;
+          }
+
+          // Adjust quantity if trying to sell more than we have
+          const sellQuantity = Math.min(quantity, position.quantity);
+          const proceeds = sellQuantity * price;
+          const costBasis = sellQuantity * position.avgPrice;
+          const realizedPnL = proceeds - costBasis;
+
+          // Update position
+          const newQuantity = position.quantity - sellQuantity;
+          if (newQuantity <= 0) {
+            positions.delete(symbol);
+          } else {
+            positions.set(symbol, {
+              ...position,
+              quantity: newQuantity
+            });
+          }
+
+          // Add proceeds to balance
+          balance += proceeds;
+          totalPnL += realizedPnL;
+          totalTrades++;
+        }
+      }
+
+      // Update account state
+      this.account.balance = balance;
+      this.account.initialBalance = initialBalance;
+      this.account.positions = positions;
+      this.account.totalPnL = totalPnL;
+      this.account.dailyPnL = 0; // Daily PnL resets daily, would need date filtering
+      this.account.totalTrades = totalTrades; // Store count from ledger (source of truth)
+
+      // Save rebuilt state
+      await this.saveAccountState();
+
+      const positionCount = positions.size;
+      console.log(`🔁 Rebuilt paper state from ledger: trades=${totalTrades} positions=${positionCount} cash=$${balance.toFixed(2)}`);
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Error rebuilding state from ledger:', error.message);
+      return false;
+    }
   }
 
   /**
@@ -293,6 +448,7 @@ class PaperTradingService extends EventEmitter {
       this.account.initialBalance = state.initialBalance || this.account.initialBalance;
       this.account.totalPnL = state.totalPnL || 0;
       this.account.dailyPnL = state.dailyPnL || 0;
+      this.account.totalTrades = state.totalTrades || 0;
       
       // Restore positions
       if (state.positions) {
@@ -309,12 +465,13 @@ class PaperTradingService extends EventEmitter {
   }
 
   /**
-   * Save account state to file
+   * Save account state to file (atomic write)
    */
   async saveAccountState() {
     const fs = require('fs').promises;
     const path = require('path');
     const stateFile = path.join(process.cwd(), 'data', 'paper_trading_state.json');
+    const tempFile = `${stateFile}.tmp`;
 
     try {
       const state = {
@@ -322,15 +479,25 @@ class PaperTradingService extends EventEmitter {
         initialBalance: this.account.initialBalance,
         totalPnL: this.account.totalPnL,
         dailyPnL: this.account.dailyPnL,
+        totalTrades: this.account.totalTrades || 0,
         positions: Object.fromEntries(this.account.positions),
         lastUpdated: new Date().toISOString()
       };
 
       // Ensure directory exists
       await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      await fs.writeFile(stateFile, JSON.stringify(state, null, 2));
+      
+      // Atomic write: write to temp file first, then rename
+      await fs.writeFile(tempFile, JSON.stringify(state, null, 2));
+      await fs.rename(tempFile, stateFile);
     } catch (error) {
       console.error('❌ Error saving account state:', error);
+      // Clean up temp file if it exists
+      try {
+        await fs.unlink(tempFile);
+      } catch (unlinkError) {
+        // Ignore cleanup errors
+      }
     }
   }
 

@@ -362,20 +362,37 @@ class AutomatedScalpingTrader extends EventEmitter {
    * Get symbols to monitor - ALL symbols from universe config
    */
   async getSymbolsToMonitor() {
-    // Get ALL symbols from universe config for maximum coverage
+    const symbolRouter = require('./symbolRouter');
+    const enableAutotrader = process.env.ENABLE_AUTOTRADER !== 'false';
+    
+    if (!enableAutotrader) {
+      return [];
+    }
+    
+    // Get ALL symbols from universe config, then filter to only Binance symbols
     try {
       const universeLoader = require('./universeLoader');
       await universeLoader.load();
-      const pairs = universeLoader.getSymbolTimeframePairs();
-      const symbols = [...new Set(pairs.map(p => p.symbol))];
+      const allPairs = universeLoader.getSymbolTimeframePairs();
+      const allSymbols = [...new Set(allPairs.map(p => p.symbol))];
       
-      // Return all symbols - we'll scan them in parallel
-      console.log(`📊 Monitoring ${symbols.length} symbols: ${symbols.join(', ')}`);
-      return symbols;
+      // Filter to only scannable (Binance) symbols
+      const scannableSymbols = symbolRouter.filterScannableSymbols(allSymbols);
+      
+      // Log summary
+      const tradingViewOnlyCount = allSymbols.length - scannableSymbols.length;
+      if (tradingViewOnlyCount > 0) {
+        console.log(`📊 Monitoring ${scannableSymbols.length} scannable symbols (${tradingViewOnlyCount} TradingView-only excluded)`);
+      } else {
+        console.log(`📊 Monitoring ${scannableSymbols.length} symbols: ${scannableSymbols.join(', ')}`);
+      }
+      
+      return scannableSymbols;
     } catch (error) {
       console.warn('⚠️  Error loading universe, using default symbols:', error.message);
-      // Fallback to default scalping symbols
-      return ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA'];
+      // Fallback to default scalping symbols (Binance only)
+      const fallbackSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+      return symbolRouter.filterScannableSymbols(fallbackSymbols);
     }
   }
 
@@ -620,6 +637,19 @@ class AutomatedScalpingTrader extends EventEmitter {
    */
   async getMarketData(symbol, timeframe = '1') {
     try {
+      const symbolRouter = require('./symbolRouter');
+      
+      // Skip market data fetch for TradingView-only symbols
+      if (!symbolRouter.shouldFetchFromBinance(symbol)) {
+        // Use normalized symbol for Set consistency (same as shouldScanSymbol)
+        const classification = symbolRouter.classifySymbol(symbol);
+        if (!symbolRouter.warnedSymbols.has(classification.normalizedSymbol)) {
+          console.log(`ℹ️  Skipping market data fetch for ${classification.normalizedSymbol} - TradingView-only symbol`);
+          symbolRouter.warnedSymbols.add(classification.normalizedSymbol);
+        }
+        return null;
+      }
+      
       // Try to get from pattern learning engine cache
       const providerFactory = require('./providerFactory');
       const universeLoader = require('./universeLoader');

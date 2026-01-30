@@ -1,0 +1,72 @@
+# Trading System Environment Variables
+# Copy relevant variables to your .env file
+
+# ===== Server Configuration =====
+PORT=3014
+WEBHOOK_PORT=3014
+
+# ===== Webhook Security =====
+WEBHOOK_SECRET=your-webhook-secret-here
+ENABLE_WEBHOOK_AUTH=true
+ENABLE_WEBHOOK_VALIDATION=true
+ENABLE_WEBHOOK_DEDUPE=true
+
+# ===== Pattern Recognition =====
+ENABLE_PATTERN_RECOGNITION=true
+ENABLE_PATTERN_FILTERING=true
+PATTERN_MIN_WIN_RATE=0.50
+PATTERN_MIN_PROFIT_FACTOR=1.0
+PATTERN_MIN_SAMPLE_SIZE=10
+
+# ===== Risk Management =====
+ENABLE_RISK_ENGINE=true
+TRADING_ENABLED=true
+MAX_DAILY_LOSS_PERCENT=2.0
+MAX_POSITION_SIZE_PERCENT=25.0
+MAX_OPEN_POSITIONS=5
+REQUIRE_STOP_LOSS=true
+REQUIRE_TAKE_PROFIT=false
+
+# ===== Account =====
+ACCOUNT_BALANCE=100000
+
+# ===== Trade Ledger =====
+ENABLE_TRADE_LEDGER=true
+LEDGER_DB_PATH=./data/trade_ledger.db
+
+# ===== Broker Configuration =====
+BROKER_TYPE=paper
+# Options: paper, oanda, ibkr
+
+# ===== Automated Trading =====
+ENABLE_AUTOTRADER=true
+AUTOTRADER_DATA_SOURCE=binance
+# Options: binance (only Binance symbols scanned)
+
+# ===== Symbol Routing =====
+ENABLE_TRADINGVIEW_ONLY_SYMBOLS=true
+# If true, symbols with : or ! (e.g., OANDA:XAUUSD) skip market data fetches
+
+# ===== Universe & Watchlist Caching =====
+UNIVERSE_CACHE_TTL_MS=60000
+# Cache universe load for 60 seconds to prevent repeated merges
+WATCHLIST_CACHE_TTL_MS=60000
+# Cache watchlist for 60 seconds to prevent spam
+
+# ===== Logging =====
+LOG_LEVEL=info
+# Options: debug, info, warn, error
+
+# ===== Market Data Provider =====
+MARKET_DATA_PROVIDER_DEFAULT=binance
+
+# ===== Paper State Management =====
+PAPER_STATE_REBUILD_ON_BOOT=true
+# Rebuild paper state from ledger on boot (default: true)
+# If false, loads from paper_trading_state.json file
+
+PAPER_STATE_RESET_ON_BOOT=false
+# Reset paper state to initial balance on boot (default: false)
+# If true, ignores ledger and resets to ACCOUNT_BALANCE
+# WARNING: This will clear all positions and trades
+

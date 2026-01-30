@@ -267,8 +267,11 @@ class EvaluationDatabase {
    * Save trade-pattern attribution (idempotent)
    */
   async saveTradePatternAttribution(tradeId, patternId, attribution) {
+    // Use INSERT OR REPLACE to allow corrections to PnL values
+    // This ensures that if the same trade-pattern pair is inserted with different PnL,
+    // the new values will replace the old ones instead of being silently ignored
     const query = `
-      INSERT OR IGNORE INTO trade_pattern_attribution (
+      INSERT OR REPLACE INTO trade_pattern_attribution (
         id, trade_id, pattern_id, pattern_confidence, trade_pnl, trade_pnl_pct
       ) VALUES (?, ?, ?, ?, ?, ?)
     `;
@@ -422,12 +425,15 @@ class EvaluationDatabase {
     const rows = await this.allAsync(query, [minSampleSize, minWinRate]);
     
     // Filter by profit_factor
-    // NULL profit_factor means "perfect" (no losses) but we treat it as failing threshold unless minProfitFactor == 0
+    // NULL profit_factor means "perfect" (no losses) - should always pass any threshold
+    // because infinite profit factor (no losses) exceeds any finite threshold
     const validated = rows
       .filter(row => {
         const pf = row.profit_factor;
         if (pf === null || pf === undefined) {
-          return minProfitFactor === 0; // Only allow NULL if threshold is 0
+          // NULL means perfect (no losses) = infinite profit factor
+          // This should always pass any threshold
+          return true;
         }
         return pf >= minProfitFactor;
       })

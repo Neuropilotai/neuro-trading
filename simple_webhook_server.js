@@ -129,15 +129,47 @@ app.post('/webhook/tradingview',
   riskCheck,                  // Risk management
   async (req, res) => {
     try {
+        // CRITICAL GUARD: If riskCheck returned 403/500, req.orderIntent won't be set
+        // This handler should only run if riskCheck passed (called next())
+        if (!req.orderIntent) {
+            // This should never happen if middleware chain is correct, but defensive check
+            console.error('❌ CRITICAL: Handler reached without orderIntent (riskCheck should have blocked)');
+            return res.status(500).json({
+                status: 'error',
+                error: 'INTERNAL_ERROR',
+                message: 'Request reached handler without orderIntent validation'
+            });
+        }
+        
         console.log('🚨 TradingView Alert Received:', JSON.stringify(req.body, null, 2));
         
         const alertData = req.body;
         const orderIntent = req.orderIntent;
+        // Use idempotency key from middleware (always available if dedupe passed)
         const idempotencyKey = req.idempotencyKey;
+        
+        // CRITICAL INVARIANT: Only mark as processed if we successfully save to ledger AND return 200
+        // Track acceptance state explicitly
+        let accepted = false;
+        
+        // Check if symbol is TradingView-only BEFORE creating trade record
+        const symbolRouter = require('./backend/services/symbolRouter');
+        const symbolClassification = symbolRouter.classifySymbol(orderIntent.symbol);
+        const isTradingViewOnlySymbol = symbolClassification.source === 'tradingview_only';
         
         // Create trade record
         const tradeId = `TRADE_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '100000');
+        
+        // Set status based on symbol type (TradingView-only = ALERT_ONLY, others = VALIDATED)
+        const initialStatus = isTradingViewOnlySymbol ? 'ALERT_ONLY' : 'VALIDATED';
+        
+        if (isTradingViewOnlySymbol) {
+            console.log(`ℹ️  Routing TradingView-only symbol to ALERT_ONLY ledger status: ${symbolClassification.normalizedSymbol}`);
+        }
+        
+        // Collect BOS/ATR metrics if available (from riskCheck middleware)
+        const bosMetrics = req.bosMetrics || null;
         
         const tradeData = {
             trade_id: tradeId,
@@ -156,22 +188,40 @@ app.post('/webhook/tradingview',
             risk_mode: alertData.risk_mode || null,
             alert_id: alertData.alert_id || null,
             alert_timestamp: alertData.timestamp ? parseInt(alertData.timestamp) : null,
-            status: 'VALIDATED',
+            status: initialStatus,
             metadata: {
-                original_alert: alertData
+                original_alert: alertData,
+                // BOS/ATR metrics for learning agent
+                bosMetrics: bosMetrics ? {
+                    atrSlope: bosMetrics.atrSlope,
+                    atrExpansion: bosMetrics.atrExpansion,
+                    currentATR: bosMetrics.currentATR,
+                    avgATR: bosMetrics.avgATR,
+                    bosCount: bosMetrics.bosCount,
+                    bosDirection: bosMetrics.bosDirection,
+                    barsSinceCHOCH: bosMetrics.barsSinceCHOCH,
+                    cooldownRequired: bosMetrics.cooldownRequired
+                } : null
             }
         };
         
         console.log('💰 Processed Trade:', tradeData);
         
-        // Save to immutable ledger
+        // Save to immutable ledger (must succeed for true acceptance)
         try {
             await tradeLedger.initialize();
             const ledgerId = await tradeLedger.insertTrade(tradeData);
-            console.log(`✅ Trade saved to ledger (ID: ${ledgerId})`);
+            console.log(`✅ Trade saved to ledger (ID: ${ledgerId}) with status: ${initialStatus}`);
         } catch (error) {
             console.error('❌ Ledger save error:', error.message);
-            // Continue even if ledger fails (graceful degradation)
+            // Not accepted → return non-2xx so TradingView can retry
+            // This ensures clean invariant: 2xx ⇒ ledgerSaved ⇒ marked, non-2xx ⇒ not marked
+            return res.status(503).json({
+                status: 'error',
+                error: 'LEDGER_WRITE_FAILED',
+                message: error.message,
+                idempotency_key: idempotencyKey
+            });
         }
         
         // Also save to file (backup/legacy)
@@ -245,102 +295,109 @@ app.post('/webhook/tradingview',
         }
         
         // Execute trade via broker adapter
+        // Skip broker execution for TradingView-only symbols (already set status='ALERT_ONLY' in ledger)
         let executionResult = null;
         try {
-            const brokerAdapter = getBrokerAdapter();
-            
-            // Ensure broker is connected before executing trade
-            // NOTE: getBrokerAdapter() does NOT auto-connect to avoid race conditions.
-            // Connection is explicitly handled here with proper awaiting to ensure
-            // isConnected() checks are reliable.
-            if (brokerAdapter.isEnabled()) {
-                // If not connected, try to connect (with timeout for first webhook)
-                if (!brokerAdapter.isConnected()) {
-                    console.log(`⏳ Broker adapter not connected, attempting connection...`);
-                    try {
-                        // Use Promise.race to add a timeout for connection attempts
-                        // IMPORTANT: We await the connection here to ensure isConnected() 
-                        // will return true before we proceed to execute trades
-                        const connectPromise = brokerAdapter.connect();
-                        const timeoutPromise = new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Connection timeout')), 5000)
-                        );
-                        await Promise.race([connectPromise, timeoutPromise]);
-                        
-                        // Verify connection state after await (defensive check)
-                        if (!brokerAdapter.isConnected()) {
-                            throw new Error('Connection completed but adapter reports not connected');
-                        }
-                        console.log(`✅ Broker adapter connected successfully`);
-                    } catch (connectError) {
-                        console.warn(`⚠️  Failed to connect to ${brokerAdapter.getName()} broker: ${connectError.message}`);
-                        // For paper trading, connection should always succeed, so continue
-                        // For real brokers, we might want to reject or fallback
-                        if (brokerAdapter.getName() !== 'Paper' && !brokerAdapter.isConnected()) {
-                            throw new Error(`Cannot execute trade: ${brokerAdapter.getName()} broker not connected`);
+            if (isTradingViewOnlySymbol) {
+                console.log(`ℹ️  TradingView symbol detected (${orderIntent.symbol}), skipping broker execution - relying on TradingView alerts only`);
+                // Trade already logged with status='ALERT_ONLY' in ledger
+                // No execution result needed (will be handled in response)
+            } else {
+                const brokerAdapter = getBrokerAdapter();
+                
+                // Ensure broker is connected before executing trade
+                // NOTE: getBrokerAdapter() does NOT auto-connect to avoid race conditions.
+                // Connection is explicitly handled here with proper awaiting to ensure
+                // isConnected() checks are reliable.
+                if (brokerAdapter.isEnabled()) {
+                    // If not connected, try to connect (with timeout for first webhook)
+                    if (!brokerAdapter.isConnected()) {
+                        console.log(`⏳ Broker adapter not connected, attempting connection...`);
+                        try {
+                            // Use Promise.race to add a timeout for connection attempts
+                            // IMPORTANT: We await the connection here to ensure isConnected() 
+                            // will return true before we proceed to execute trades
+                            const connectPromise = brokerAdapter.connect();
+                            const timeoutPromise = new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('Connection timeout')), 5000)
+                            );
+                            await Promise.race([connectPromise, timeoutPromise]);
+                            
+                            // Verify connection state after await (defensive check)
+                            if (!brokerAdapter.isConnected()) {
+                                throw new Error('Connection completed but adapter reports not connected');
+                            }
+                            console.log(`✅ Broker adapter connected successfully`);
+                        } catch (connectError) {
+                            console.warn(`⚠️  Failed to connect to ${brokerAdapter.getName()} broker: ${connectError.message}`);
+                            // For paper trading, connection should always succeed, so continue
+                            // For real brokers, we might want to reject or fallback
+                            if (brokerAdapter.getName() !== 'Paper' && !brokerAdapter.isConnected()) {
+                                throw new Error(`Cannot execute trade: ${brokerAdapter.getName()} broker not connected`);
+                            }
                         }
                     }
-                }
-                
-                // Execute trade if connected (final safety check)
-                if (brokerAdapter.isConnected()) {
-                    executionResult = await brokerAdapter.placeOrder(orderIntent);
-                    console.log(`✅ Trade executed via ${brokerAdapter.getName()} broker: ${executionResult.tradeId}`);
                     
-                    // Update trade status to EXECUTED/FILLED in ledger
-                    if (executionResult.executionResult) {
-                        tradeData.status = 'FILLED';
-                        tradeData.pnl = executionResult.executionResult.pnl || 0;
-                        tradeData.executed_at = executionResult.executionResult.executedAt;
+                    // Execute trade if connected (final safety check)
+                    if (brokerAdapter.isConnected()) {
+                        executionResult = await brokerAdapter.placeOrder(orderIntent);
+                        console.log(`✅ Trade executed via ${brokerAdapter.getName()} broker: ${executionResult.tradeId}`);
                         
-                        // Learn from trade outcome (pattern recognition + learning agents)
-                        try {
-                            // Prepare market data for pattern learning
-                            const marketData = {
-                                timestamp: new Date().toISOString(),
-                                price: orderIntent.price,
-                                high: orderIntent.price * 1.01, // Estimate
-                                low: orderIntent.price * 0.99,  // Estimate
-                                volume: alertData.volume || null,
-                                previousClose: alertData.previousClose || null,
-                                timeframe: alertData.timeframe || '5min',
-                                indicators: {
-                                    rsi: alertData.rsi || null,
-                                    macd: alertData.macd || null,
-                                    ema20: alertData.ema20 || null,
-                                    ema50: alertData.ema50 || null
-                                }
-                            };
+                        // Update trade status to EXECUTED/FILLED in ledger
+                        if (executionResult.executionResult) {
+                            tradeData.status = 'FILLED';
+                            tradeData.pnl = executionResult.executionResult.pnl || 0;
+                            tradeData.executed_at = executionResult.executionResult.executedAt;
                             
-                            // Learn from trade (includes pattern recognition + indicator learning)
-                            await tradingLearningService.learnFromTrade(
-                                {
-                                    symbol: orderIntent.symbol,
-                                    action: orderIntent.action,
-                                    pnl: tradeData.pnl,
-                                    fillPrice: executionResult.executionResult.fillPrice,
-                                    filledQuantity: executionResult.executionResult.filledQuantity,
-                                    indicatorMatch: indicatorMatch ? {
-                                        indicatorId: indicatorMatch.indicatorId,
-                                        indicatorName: indicatorMatch.indicatorName,
-                                        confidence: indicatorMatch.confidence
-                                    } : null
-                                },
-                                orderIntent,
-                                marketData
-                            );
-                            
-                            console.log('🧠 Pattern learning completed');
-                        } catch (learningError) {
-                            console.error('❌ Pattern learning error:', learningError.message);
-                            // Continue - learning failure shouldn't break trade execution
+                            // Learn from trade outcome (pattern recognition + learning agents)
+                            try {
+                                // Prepare market data for pattern learning
+                                const marketData = {
+                                    timestamp: new Date().toISOString(),
+                                    price: orderIntent.price,
+                                    high: orderIntent.price * 1.01, // Estimate
+                                    low: orderIntent.price * 0.99,  // Estimate
+                                    volume: alertData.volume || null,
+                                    previousClose: alertData.previousClose || null,
+                                    timeframe: alertData.timeframe || '5min',
+                                    indicators: {
+                                        rsi: alertData.rsi || null,
+                                        macd: alertData.macd || null,
+                                        ema20: alertData.ema20 || null,
+                                        ema50: alertData.ema50 || null
+                                    }
+                                };
+                                
+                                // Learn from trade (includes pattern recognition + indicator learning)
+                                await tradingLearningService.learnFromTrade(
+                                    {
+                                        symbol: orderIntent.symbol,
+                                        action: orderIntent.action,
+                                        pnl: tradeData.pnl,
+                                        fillPrice: executionResult.executionResult.fillPrice,
+                                        filledQuantity: executionResult.executionResult.filledQuantity,
+                                        indicatorMatch: indicatorMatch ? {
+                                            indicatorId: indicatorMatch.indicatorId,
+                                            indicatorName: indicatorMatch.indicatorName,
+                                            confidence: indicatorMatch.confidence
+                                        } : null
+                                    },
+                                    orderIntent,
+                                    marketData
+                                );
+                                
+                                console.log('🧠 Pattern learning completed');
+                            } catch (learningError) {
+                                console.error('❌ Pattern learning error:', learningError.message);
+                                // Continue - learning failure shouldn't break trade execution
+                            }
                         }
+                    } else {
+                        console.warn(`⚠️  Broker adapter (${brokerAdapter.getName()}) is not connected after connection attempt`);
                     }
                 } else {
-                    console.warn(`⚠️  Broker adapter (${brokerAdapter.getName()}) is not connected after connection attempt`);
+                    console.warn(`⚠️  Broker adapter (${brokerAdapter.getName()}) is disabled`);
                 }
-            } else {
-                console.warn(`⚠️  Broker adapter (${brokerAdapter.getName()}) is disabled`);
             }
         } catch (error) {
             console.error(`❌ Trade execution failed: ${error.message}`);
@@ -387,23 +444,59 @@ app.post('/webhook/tradingview',
           console.warn('⚠️  Telemetry recording failed:', err.message);
         });
         
-        res.status(200).json({ 
-            status: 'success', 
-            message: 'Trade alert received and validated' + (executionResult ? ' and executed' : ''),
-            trade_id: tradeId,
-            idempotency_key: idempotencyKey,
-            execution: executionResult ? {
+        // Build execution response based on symbol type
+        let executionResponse;
+        if (isTradingViewOnlySymbol) {
+            // TradingView-only symbols: not executed, reason provided
+            executionResponse = {
+                executed: false,
+                reason: 'TRADINGVIEW_ONLY'
+            };
+        } else if (executionResult) {
+            // Normal execution
+            executionResponse = {
                 executed: true,
                 tradeId: executionResult.tradeId,
                 fillPrice: executionResult.executionResult?.fillPrice,
                 filledQuantity: executionResult.executionResult?.filledQuantity,
                 pnl: executionResult.executionResult?.pnl
-            } : { executed: false },
+            };
+        } else {
+            // No execution (e.g., TRADING_ENABLED=false for Binance symbols)
+            executionResponse = { executed: false };
+        }
+        
+        // CRITICAL INVARIANT: Only mark as processed if ledger saved successfully
+        // Ledger save happens at line 197 - if it fails, we return 503 at line 203
+        // If we reach here, ledger save succeeded, so we can mark as accepted
+        accepted = true;
+        
+        // Mark as processed in deduplication cache (only on true acceptance)
+        // Invariant: 2xx response ⇒ ledger saved ⇒ marked as processed
+        // This ensures failed requests (403, 500, 503) can be retried
+        // IMPORTANT: Mark BEFORE sending response to avoid race conditions
+        // CRITICAL: Only mark if we're about to return 200 (ledger saved successfully)
+        if (idempotencyKey && accepted) {
+          await deduplicationService.markAsProcessed(idempotencyKey);
+        }
+        
+        // Send success response (ledger saved, marked as processed)
+        // Note: status "success" means "received and recorded", execution may be false
+        // CRITICAL: This is the ONLY place where we return 200, ensuring markAsProcessed is only called on success
+        return res.status(200).json({ 
+            status: 'success', 
+            message: 'Trade alert received and validated' + (executionResult ? ' and executed' : ''),
+            trade_id: tradeId,
+            idempotency_key: idempotencyKey,
+            execution: executionResponse,
             data: tradeData
         });
         
     } catch (error) {
         console.error('❌ Webhook error:', error.message);
+        // CRITICAL: Do NOT mark as processed on error (non-2xx response)
+        // This ensures TradingView can retry failed requests
+        // accepted remains false, so markAsProcessed() is never called
         res.status(500).json({ 
             status: 'error', 
             message: error.message 
@@ -483,6 +576,90 @@ app.get('/api/account', async (req, res) => {
 app.get('/api/learning', (req, res) => {
     const learningMetrics = tradingLearningService.getMetrics();
     res.json(learningMetrics);
+});
+
+// ===== DEV-ONLY DEDUPE ENDPOINTS =====
+
+// Helper to check if dev endpoints are enabled
+const isDevEndpointsEnabled = () => {
+    return process.env.NODE_ENV === 'development' || process.env.ENABLE_DEV_ENDPOINTS === 'true';
+};
+
+// Get dedupe stats (dev only)
+app.get('/api/dedupe/stats', (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+
+    try {
+        const stats = deduplicationService.getStats();
+        const sampleKeys = deduplicationService.getSampleKeys(20);
+        const cacheFile = deduplicationService.getCacheFilePath();
+        const fs = require('fs');
+        
+        // Check if cache file exists
+        let cacheFileExists = false;
+        try {
+            fs.accessSync(cacheFile, fs.constants.F_OK);
+            cacheFileExists = true;
+        } catch (e) {
+            // File doesn't exist, that's okay
+        }
+
+        res.json({
+            enabled: stats.enabled,
+            size: stats.size,
+            ttlSeconds: stats.ttl,
+            sampleKeys: sampleKeys,
+            source: 'in_memory', // Always in-memory with optional file persistence
+            cacheFile: cacheFileExists ? cacheFile : null
+        });
+    } catch (error) {
+        console.error('❌ Error getting dedupe stats:', error.message);
+        res.status(500).json({
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
+});
+
+// Reset dedupe cache (dev only)
+app.post('/api/dedupe/reset', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+
+    try {
+        const fs = require('fs').promises;
+        const cacheFile = deduplicationService.getCacheFilePath();
+        
+        // Clear in-memory cache
+        const cleared = deduplicationService.clearCache();
+        
+        // Delete cache file if it exists
+        let deletedFile = false;
+        try {
+            await fs.unlink(cacheFile);
+            deletedFile = true;
+        } catch (error) {
+            if (error.code !== 'ENOENT') {
+                // File doesn't exist, that's okay
+                throw error;
+            }
+        }
+
+        res.json({
+            status: 'ok',
+            cleared: cleared,
+            deletedFile: deletedFile
+        });
+    } catch (error) {
+        console.error('❌ Error resetting dedupe cache:', error.message);
+        res.status(500).json({
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
 });
 
 // ===== DASHBOARD API ENDPOINTS =====
@@ -1569,6 +1746,14 @@ app.listen(port, async () => {
         }
     } catch (error) {
         console.error(`❌ Broker adapter initialization error: ${error.message}`);
+    }
+    
+    // Initialize paper trading state (rebuild from ledger if enabled)
+    try {
+        await paperTradingService.initializeState();
+        console.log(`✅ Paper trading state initialized`);
+    } catch (error) {
+        console.error(`❌ Paper trading state initialization failed: ${error.message}`);
     }
     
     console.log(`📊 Paper Trading: ${process.env.ENABLE_PAPER_TRADING !== 'false' ? 'ENABLED' : 'DISABLED'}`);

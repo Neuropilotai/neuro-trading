@@ -277,7 +277,7 @@ describe('Pattern Performance Filtering', () => {
         firstSeenDate: new Date().toISOString()
       });
 
-      // Pattern with NULL profit_factor and minProfitFactor = 1.0 (should fail)
+      // Pattern with NULL profit_factor and minProfitFactor = 1.0 (should pass — NULL treated as infinite PF)
       await evaluationDb.updatePatternPerformance(patternId2, {
         patternType: 'double_bottom',
         symbol: 'TSLA',
@@ -300,13 +300,17 @@ describe('Pattern Performance Filtering', () => {
       });
       assert.strictEqual(validated1.includes(patternId1), true, 'NULL profit_factor should pass when threshold is 0');
 
-      // With minProfitFactor = 1.0, NULL should fail
+      // With minProfitFactor = 1.0, NULL should pass (treated as infinite)
       const validated2 = await evaluationDb.getValidatedPatterns({
         minWinRate: 0.50,
         minProfitFactor: 1.0,
         minSampleSize: 10
       });
-      assert.strictEqual(validated2.includes(patternId2), false, 'NULL profit_factor should fail when threshold > 0');
+      assert.strictEqual(
+        validated2.includes(patternId2),
+        true,
+        'NULL profit_factor (treated as infinite) should pass any positive threshold'
+      );
     });
   });
 
