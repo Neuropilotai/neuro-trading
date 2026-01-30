@@ -1,0 +1,548 @@
+//@version=6
+strategy("NP — BOS/CHOCH Hybrid 5m Scalper+Daytrade (v8.2 SOFT ADX FIX)", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, process_orders_on_close=true, calc_on_every_tick=true, max_bars_back=2000, max_labels_count=500)
+
+// ============================================================================
+// v8.2 SOFT ADX FIX - Key Changes
+// ============================================================================
+// 1. FIXED: Configurable soft ADX gate for entries
+//    - Added softAdxMin input (default 12.0) - minimum ADX for soft gate
+//    - Added softAdxBuffer input (default 6.0) - buffer below threshold
+//    - Soft gate now: max(softAdxMin, adxThreshold - softAdxBuffer)
+//    - Example: threshold=20, buffer=6, min=12 → soft gate = max(12, 14) = 14
+//    - This prevents "deadlock" when ADX is between 12-15 (common on XAUUSD 5m)
+// 2. PRESERVED: All previous fixes (trend mode, state alignment, bootstrap, etc.)
+// 3. CHOCH logic unchanged (still strict regimeOk for anti-spam)
+// 4. Entry logic unchanged (benefits from adjustable soft gate)
+
+var string G_CORE = "⚙️ Core"
+useSessionFilter = input.bool(true, "Use Session Filter", group=G_CORE)
+sessionPreset = input.string("London+NY", "Session Preset", options=["Stocks", "London+NY", "24H", "Custom"], group=G_CORE)
+tradeSession = input.session("0300-1200,0830-1600", "Custom Session", group=G_CORE)
+maxTradesPerSession = input.int(10, "Max Trades / Session", minval=1, maxval=30, group=G_CORE)
+cooldownBars = input.int(3, "Cooldown Bars After Exit", minval=0, maxval=100, group=G_CORE)
+
+var string G_STRUCT = "🏗️ Structure"
+swingLeft = input.int(2, "Swing Left", minval=1, maxval=10, group=G_STRUCT)
+swingRight = input.int(2, "Swing Right", minval=1, maxval=10, group=G_STRUCT)
+minSwingATR = input.float(0.20, "Min Swing Size (ATR)", minval=0.05, maxval=5.0, step=0.05, group=G_STRUCT)
+chochBreakATR = input.float(0.18, "CHOCH Break (ATR)", minval=0.05, maxval=3.0, step=0.05, group=G_STRUCT)
+bosBreakATR_A = input.float(0.06, "BOS Break (ATR) — Scalp", minval=0.05, maxval=2.0, step=0.05, group=G_STRUCT)
+bosBreakATR_B = input.float(0.10, "BOS Break (ATR) — Runner", minval=0.05, maxval=3.0, step=0.05, group=G_STRUCT)
+minBarsBetweenCHOCH = input.int(25, "Min Bars Between CHOCH", minval=5, maxval=100, group=G_STRUCT)
+minBarsBetweenBOS = input.int(3, "Min Bars Between BOS", minval=1, maxval=50, group=G_STRUCT)
+minATRSinceCHOCH = input.float(1.5, "Min ATR Distance Since CHOCH", minval=0.5, maxval=5.0, step=0.1, group=G_STRUCT)
+pullbackDepthATR = input.float(0.35, "BOS Pullback Depth (ATR)", minval=0.1, maxval=2.0, step=0.05, group=G_STRUCT)
+useCloseConfirm = input.bool(false, "Require Close Confirmation", group=G_STRUCT)
+useBOSPullback = input.bool(true, "Require Pullback After BOS", group=G_STRUCT)
+usePivotAtrFilter = input.bool(false, "Use ATR Filter for Pivots (XAU 5m: OFF)", group=G_STRUCT)
+bootstrapStateFromHTF = input.bool(true, "Bootstrap State from HTF when NEUTRAL", group=G_STRUCT)
+
+var string G_TREND = "🧭 Trend Filters"
+useHTF = input.bool(true, "Use HTF Trend Filter", group=G_TREND)
+htfTf = input.timeframe("30", "HTF Timeframe", group=G_TREND)
+htfEmaLen = input.int(100, "HTF EMA Length", minval=20, maxval=400, group=G_TREND)
+useLTF = input.bool(true, "Use LTF EMA Filter", group=G_TREND)
+ltfEmaLen = input.int(50, "LTF EMA Length", minval=10, maxval=200, group=G_TREND)
+useHTFForCHOCH = input.bool(true, "Require HTF Alignment for CHOCH", group=G_TREND)
+trendMode = input.string("Strict (HTF+LTF)", "Trend Mode", options=["Strict (HTF+LTF)", "Either (HTF OR LTF)", "HTF Only", "LTF Only"], group=G_TREND)
+
+var string G_REGIME = "📈 Regime Filter"
+useRegimeFilter = input.bool(true, "Use Regime Filter (ADX)", group=G_REGIME)
+adxLen = input.int(14, "ADX Length", minval=5, maxval=50, group=G_REGIME)
+adxThreshold = input.float(20.0, "ADX Threshold (Trending >=)", minval=10.0, maxval=50.0, step=1.0, group=G_REGIME)
+chochATRGate = input.float(0.85, "CHOCH ATR Gate (Expansion >=)", minval=0.50, maxval=1.50, step=0.05, group=G_REGIME)
+useSoftRegimeForEntries = input.bool(true, "Use Soft Regime Filter for Entries", group=G_REGIME)
+softAdxMin = input.float(12.0, "Soft ADX Min for Entries", minval=5.0, maxval=30.0, step=0.5, group=G_REGIME)
+softAdxBuffer = input.float(6.0, "Soft ADX Buffer (Threshold - X)", minval=0.0, maxval=15.0, step=0.5, group=G_REGIME)
+
+var string G_ATR = "📊 Volatility"
+atrLen = input.int(14, "ATR Length", minval=5, maxval=50, group=G_ATR)
+atrLookback = input.int(14, "ATR SMA Lookback", minval=5, maxval=100, group=G_ATR)
+atrGate = input.float(0.65, "ATR Gate for Trading (ATR / ATR_SMA >=)", minval=0.50, maxval=1.50, step=0.05, group=G_ATR)
+
+var string G_RISK = "💰 Risk & Exits"
+stopATR = input.float(1.20, "Stop (ATR)", minval=0.3, maxval=5.0, step=0.05, group=G_RISK)
+tpScalpATR = input.float(0.80, "TP Scalp (ATR)", minval=0.2, maxval=3.0, step=0.05, group=G_RISK)
+tpRunnerATR = input.float(2.50, "TP Runner (ATR)", minval=0.5, maxval=10.0, step=0.10, group=G_RISK)
+useBreakeven = input.bool(true, "Enable Break-Even After Profit", group=G_RISK)
+breakevenATR = input.float(0.5, "Move to BE After +ATR", minval=0.2, maxval=2.0, step=0.05, group=G_RISK)
+breakevenBufferATR = input.float(0.1, "BE Buffer (ATR)", minval=0.0, maxval=1.0, step=0.05, group=G_RISK)
+
+var string G_TRAIL = "🧲 Trailing (Delayed)"
+useTrail = input.bool(true, "Enable Trailing After Profit Threshold", group=G_TRAIL)
+trailActivateATR = input.float(1.0, "Activate Trail After +ATR", minval=0.10, maxval=5.0, step=0.05, group=G_TRAIL)
+trailOffsetATR = input.float(0.75, "Trail Offset (ATR)", minval=0.10, maxval=5.0, step=0.05, group=G_TRAIL)
+
+var string G_VIS = "🎨 Visual"
+showLabels = input.bool(true, "Show BOS/CHOCH Labels", group=G_VIS)
+showStateTable = input.bool(true, "Show Status Table", group=G_VIS)
+minBarsBetweenLabels = input.int(8, "Min Bars Between Labels", minval=1, maxval=50, group=G_VIS)
+
+atr = ta.atr(atrLen)
+atrSMA = ta.sma(atr, atrLookback)
+atrRatio = atrSMA > 0 ? atr / atrSMA : 1.0
+atrOk = atrRatio >= atrGate
+
+tr = math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+up = ta.change(high)
+down = -ta.change(low)
+plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+trur = ta.rma(tr, adxLen)
+plusRMA = ta.rma(plusDM, adxLen)
+minusRMA = ta.rma(minusDM, adxLen)
+plus = na(trur) or trur == 0 ? 0 : 100 * plusRMA / trur
+minus = na(trur) or trur == 0 ? 0 : 100 * minusRMA / trur
+sum = plus + minus
+dx = sum == 0 ? 0 : math.abs(plus - minus) / sum
+adx = 100 * ta.rma(dx, adxLen)
+
+regimeOk = not useRegimeFilter or adx >= adxThreshold
+softAdxGate = math.max(softAdxMin, adxThreshold - softAdxBuffer)
+regimeSoftOk = not useRegimeFilter or not useSoftRegimeForEntries or adx >= softAdxGate
+
+is24HMarket = str.contains(syminfo.ticker, "OANDA:") or str.contains(syminfo.ticker, "FX:") or str.contains(syminfo.ticker, "XAUUSD") or str.contains(syminfo.ticker, "GOLD") or str.contains(syminfo.ticker, "COMEX:")
+
+sessionStr = sessionPreset == "Stocks" ? "0930-1600" : sessionPreset == "London+NY" ? "0300-1200,0830-1600" : sessionPreset == "24H" ? "0000-2359" : tradeSession
+finalSession = (is24HMarket and sessionPreset == "Stocks") ? "0000-2359" : sessionStr
+sessionOk = not useSessionFilter ? true : not na(time(timeframe.period, finalSession))
+
+htfClose = request.security(syminfo.tickerid, htfTf, close, barmerge.gaps_off, barmerge.lookahead_off)
+htfEma = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfEmaLen), barmerge.gaps_off, barmerge.lookahead_off)
+htfUp = htfClose > htfEma
+htfDn = htfClose < htfEma
+htfEmaSlope = htfEma - htfEma[1]
+htfSlopeOk = math.abs(htfEmaSlope) >= (atr * 0.1)
+
+ltfEma = ta.ema(close, ltfEmaLen)
+ltfUp = close > ltfEma
+ltfDn = close < ltfEma
+
+htfLongOk = (not useHTF) or htfUp
+htfShortOk = (not useHTF) or htfDn
+ltfLongOk = (not useLTF) or ltfUp
+ltfShortOk = (not useLTF) or ltfDn
+
+trendOkLong = if trendMode == "HTF Only"
+    htfUp
+else if trendMode == "LTF Only"
+    ltfUp
+else if trendMode == "Either (HTF OR LTF)"
+    (useHTF and htfUp) or (useLTF and ltfUp) or (not useHTF and not useLTF)
+else
+    htfLongOk and ltfLongOk
+
+trendOkShort = if trendMode == "HTF Only"
+    htfDn
+else if trendMode == "LTF Only"
+    ltfDn
+else if trendMode == "Either (HTF OR LTF)"
+    (useHTF and htfDn) or (useLTF and ltfDn) or (not useHTF and not useLTF)
+else
+    htfShortOk and ltfShortOk
+
+ph = ta.pivothigh(high, swingLeft, swingRight)
+pl = ta.pivotlow(low, swingLeft, swingRight)
+
+// Raw pivots always allowed
+rawPH = not na(ph)
+rawPL = not na(pl)
+
+// Optional ATR validation (OFF by default for XAU 5m)
+validPH = rawPH and (not usePivotAtrFilter or (ph - low[swingRight]) >= (atr * minSwingATR))
+validPL = rawPL and (not usePivotAtrFilter or (high[swingRight] - pl) >= (atr * minSwingATR))
+
+var array<float> confirmedSwingHighs = array.new<float>(5)
+var array<float> confirmedSwingLows = array.new<float>(5)
+var array<int> confirmedSwingHighBars = array.new<int>(5)
+var array<int> confirmedSwingLowBars = array.new<int>(5)
+
+if validPH
+    pivotBar = bar_index - swingRight
+    array.unshift(confirmedSwingHighs, ph)
+    array.unshift(confirmedSwingHighBars, pivotBar)
+    if array.size(confirmedSwingHighs) > 5
+        array.pop(confirmedSwingHighs)
+        array.pop(confirmedSwingHighBars)
+
+if validPL
+    pivotBar = bar_index - swingRight
+    array.unshift(confirmedSwingLows, pl)
+    array.unshift(confirmedSwingLowBars, pivotBar)
+    if array.size(confirmedSwingLows) > 5
+        array.pop(confirmedSwingLows)
+        array.pop(confirmedSwingLowBars)
+
+var string state = "NEUTRAL"
+var int lastCHOCHBar = na
+var int lastBOSBar = na
+var int lastStructureBar = na
+var float lastCHOCHPrice = na
+var float lastBOSPrice = na
+var string lastBOSDirection = na
+var bool bosPullbackRequired = false
+
+getLatestSwingHigh = array.size(confirmedSwingHighs) > 0 ? array.get(confirmedSwingHighs, 0) : na
+getLatestSwingLow = array.size(confirmedSwingLows) > 0 ? array.get(confirmedSwingLows, 0) : na
+getPriorSwingHigh = array.size(confirmedSwingHighs) > 1 ? array.get(confirmedSwingHighs, 1) : na
+getPriorSwingLow = array.size(confirmedSwingLows) > 1 ? array.get(confirmedSwingLows, 1) : na
+
+chochUpCondition = false
+chochDnCondition = false
+
+if state == "TREND_DN" or state == "NEUTRAL"
+    latestHigh = getLatestSwingHigh
+    priorHigh = getPriorSwingHigh
+    atrExpansionOk = atrRatio >= chochATRGate
+    htfAlignmentOk = not useHTFForCHOCH or htfUp or htfSlopeOk
+    minDistanceOk = na(lastCHOCHPrice) or (math.abs(close - lastCHOCHPrice) >= atr * minATRSinceCHOCH)
+    if not na(latestHigh) and not na(priorHigh)
+        lowerHighPattern = latestHigh < priorHigh
+        breakLevel = latestHigh + atr * chochBreakATR
+        priceBreak = useCloseConfirm ? close > breakLevel : high > breakLevel
+        chochUpCondition := priceBreak and lowerHighPattern and atrExpansionOk and htfAlignmentOk and minDistanceOk and regimeOk
+    else if not na(latestHigh) and na(priorHigh)
+        breakLevel = latestHigh + atr * chochBreakATR
+        priceBreak = useCloseConfirm ? close > breakLevel : high > breakLevel
+        chochUpCondition := priceBreak and atrExpansionOk and htfAlignmentOk and minDistanceOk and regimeOk
+
+if state == "TREND_UP" or state == "NEUTRAL"
+    latestLow = getLatestSwingLow
+    priorLow = getPriorSwingLow
+    atrExpansionOk = atrRatio >= chochATRGate
+    htfAlignmentOk = not useHTFForCHOCH or htfDn or htfSlopeOk
+    minDistanceOk = na(lastCHOCHPrice) or (math.abs(close - lastCHOCHPrice) >= atr * minATRSinceCHOCH)
+    if not na(latestLow) and not na(priorLow)
+        higherLowPattern = latestLow > priorLow
+        breakLevel = latestLow - atr * chochBreakATR
+        priceBreak = useCloseConfirm ? close < breakLevel : low < breakLevel
+        chochDnCondition := priceBreak and higherLowPattern and atrExpansionOk and htfAlignmentOk and minDistanceOk and regimeOk
+    else if not na(latestLow) and na(priorLow)
+        breakLevel = latestLow - atr * chochBreakATR
+        priceBreak = useCloseConfirm ? close < breakLevel : low < breakLevel
+        chochDnCondition := priceBreak and atrExpansionOk and htfAlignmentOk and minDistanceOk and regimeOk
+
+chochUp = chochUpCondition and (na(lastCHOCHBar) or (bar_index - lastCHOCHBar >= minBarsBetweenCHOCH)) and (lastStructureBar != bar_index)
+chochDn = chochDnCondition and (na(lastCHOCHBar) or (bar_index - lastCHOCHBar >= minBarsBetweenCHOCH)) and (lastStructureBar != bar_index)
+
+if chochUp
+    state := "TREND_UP"
+    lastCHOCHBar := bar_index
+    lastCHOCHPrice := close
+    lastStructureBar := bar_index
+    bosPullbackRequired := false
+    lastBOSPrice := na
+    lastBOSDirection := na
+
+if chochDn
+    state := "TREND_DN"
+    lastCHOCHBar := bar_index
+    lastCHOCHPrice := close
+    lastStructureBar := bar_index
+    bosPullbackRequired := false
+    lastBOSPrice := na
+    lastBOSDirection := na
+
+if barstate.isconfirmed
+    if bootstrapStateFromHTF and state == "NEUTRAL"
+        if trendOkLong and not trendOkShort
+            state := "TREND_UP"
+        else if trendOkShort and not trendOkLong
+            state := "TREND_DN"
+    
+    if state == "TREND_UP" and trendOkShort and not trendOkLong
+        state := "NEUTRAL"
+    
+    if state == "TREND_DN" and trendOkLong and not trendOkShort
+        state := "NEUTRAL"
+
+latestHighForBOS = getLatestSwingHigh
+latestLowForBOS = getLatestSwingLow
+
+// --- Visualize structure levels (debug)
+plot(latestHighForBOS, "Last Swing High", color=color.new(color.blue, 50), style=plot.style_linebr, linewidth=1)
+plot(latestLowForBOS, "Last Swing Low", color=color.new(color.blue, 50), style=plot.style_linebr, linewidth=1)
+
+bosDnLevelScalp = na(latestLowForBOS) ? na : latestLowForBOS - atr * bosBreakATR_A
+bosDnLevelRunner = na(latestLowForBOS) ? na : latestLowForBOS - atr * bosBreakATR_B
+bosUpLevelScalp = na(latestHighForBOS) ? na : latestHighForBOS + atr * bosBreakATR_A
+bosUpLevelRunner = na(latestHighForBOS) ? na : latestHighForBOS + atr * bosBreakATR_B
+
+plot(bosDnLevelScalp, "BOS DN Level Scalp", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2)
+plot(bosDnLevelRunner, "BOS DN Level Runner", color=color.new(color.red, 30), style=plot.style_linebr, linewidth=2)
+plot(bosUpLevelScalp, "BOS UP Level Scalp", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2)
+plot(bosUpLevelRunner, "BOS UP Level Runner", color=color.new(color.green, 30), style=plot.style_linebr, linewidth=2)
+
+// Distance to BOS levels (for table debug)
+dnDistScalp = na(latestLowForBOS) ? na : (low - bosDnLevelScalp)
+dnDistRunner = na(latestLowForBOS) ? na : (low - bosDnLevelRunner)
+upDistScalp = na(latestHighForBOS) ? na : (bosUpLevelScalp - high)
+upDistRunner = na(latestHighForBOS) ? na : (bosUpLevelRunner - high)
+
+pullbackOk = true
+if bosPullbackRequired and not na(lastBOSPrice) and not na(lastBOSDirection)
+    if lastBOSDirection == "UP"
+        pullbackOk := close < (lastBOSPrice - atr * pullbackDepthATR)
+    else if lastBOSDirection == "DOWN"
+        pullbackOk := close > (lastBOSPrice + atr * pullbackDepthATR)
+
+bosUpScalp = (state == "TREND_UP") and not na(latestHighForBOS) and (useCloseConfirm ? close > latestHighForBOS + atr * bosBreakATR_A : high > latestHighForBOS + atr * bosBreakATR_A) and (na(lastBOSBar) or (bar_index - lastBOSBar >= minBarsBetweenBOS)) and (lastStructureBar != bar_index) and pullbackOk
+bosDnScalp = (state == "TREND_DN") and not na(latestLowForBOS) and (useCloseConfirm ? close < latestLowForBOS - atr * bosBreakATR_A : low < latestLowForBOS - atr * bosBreakATR_A) and (na(lastBOSBar) or (bar_index - lastBOSBar >= minBarsBetweenBOS)) and (lastStructureBar != bar_index) and pullbackOk
+bosUpRunner = (state == "TREND_UP") and not na(latestHighForBOS) and (useCloseConfirm ? close > latestHighForBOS + atr * bosBreakATR_B : high > latestHighForBOS + atr * bosBreakATR_B) and (na(lastBOSBar) or (bar_index - lastBOSBar >= minBarsBetweenBOS)) and (lastStructureBar != bar_index) and pullbackOk
+bosDnRunner = (state == "TREND_DN") and not na(latestLowForBOS) and (useCloseConfirm ? close < latestLowForBOS - atr * bosBreakATR_B : low < latestLowForBOS - atr * bosBreakATR_B) and (na(lastBOSBar) or (bar_index - lastBOSBar >= minBarsBetweenBOS)) and (lastStructureBar != bar_index) and pullbackOk
+
+if bosUpScalp or bosUpRunner
+    lastBOSBar := bar_index
+    lastBOSPrice := close
+    lastBOSDirection := "UP"
+    lastStructureBar := bar_index
+    bosPullbackRequired := useBOSPullback
+
+if bosDnScalp or bosDnRunner
+    lastBOSBar := bar_index
+    lastBOSPrice := close
+    lastBOSDirection := "DOWN"
+    lastStructureBar := bar_index
+    bosPullbackRequired := useBOSPullback
+
+canTrade = sessionOk and atrOk
+
+var int tradesThisSession = 0
+var int lastExitBar = na
+var bool prevSessionOk = false
+
+if sessionOk and not prevSessionOk
+    tradesThisSession := 0
+prevSessionOk := sessionOk
+
+cooldownOk = (cooldownBars <= 0) or na(lastExitBar) or (bar_index - lastExitBar >= cooldownBars)
+tradeSlotsOk = tradesThisSession < maxTradesPerSession
+
+flat = strategy.position_size == 0
+
+longRunner = canTrade and regimeSoftOk and cooldownOk and tradeSlotsOk and flat and bosUpRunner and trendOkLong
+shortRunner = canTrade and regimeSoftOk and cooldownOk and tradeSlotsOk and flat and bosDnRunner and trendOkShort
+longScalp = canTrade and regimeSoftOk and cooldownOk and tradeSlotsOk and flat and (not longRunner) and bosUpScalp and trendOkLong
+shortScalp = canTrade and regimeSoftOk and cooldownOk and tradeSlotsOk and flat and (not shortRunner) and bosDnScalp and trendOkShort
+
+var string entryMode = "NONE"
+var float entryPrice = na
+var float breakevenStop = na
+
+if longRunner
+    entryMode := "RUNNER"
+    entryPrice := close
+    strategy.entry("Long", strategy.long, comment="BOS UP RUNNER")
+    tradesThisSession += 1
+else if shortRunner
+    entryMode := "RUNNER"
+    entryPrice := close
+    strategy.entry("Short", strategy.short, comment="BOS DN RUNNER")
+    tradesThisSession += 1
+else if longScalp
+    entryMode := "SCALP"
+    entryPrice := close
+    strategy.entry("Long", strategy.long, comment="BOS UP SCALP")
+    tradesThisSession += 1
+else if shortScalp
+    entryMode := "SCALP"
+    entryPrice := close
+    strategy.entry("Short", strategy.short, comment="BOS DN SCALP")
+    tradesThisSession += 1
+
+posWas = nz(strategy.position_size[1])
+posNow = strategy.position_size
+if posWas != 0 and posNow == 0
+    lastExitBar := bar_index
+    entryMode := "NONE"
+    entryPrice := na
+    breakevenStop := na
+
+tpATR = entryMode == "RUNNER" ? tpRunnerATR : tpScalpATR
+
+longTrailOn = useTrail and strategy.position_size > 0 and (close - strategy.position_avg_price) >= atr * trailActivateATR
+shortTrailOn = useTrail and strategy.position_size < 0 and (strategy.position_avg_price - close) >= atr * trailActivateATR
+
+longBreakevenOn = useBreakeven and strategy.position_size > 0 and not na(entryPrice) and (close - entryPrice) >= atr * breakevenATR
+shortBreakevenOn = useBreakeven and strategy.position_size < 0 and not na(entryPrice) and (entryPrice - close) >= atr * breakevenATR
+
+if longBreakevenOn and na(breakevenStop)
+    breakevenStop := entryPrice + atr * breakevenBufferATR
+
+if shortBreakevenOn and na(breakevenStop)
+    breakevenStop := entryPrice - atr * breakevenBufferATR
+
+if strategy.position_size > 0
+    avg = strategy.position_avg_price
+    sl = na(breakevenStop) ? (avg - atr * stopATR) : math.max(breakevenStop, avg - atr * stopATR)
+    tp = avg + atr * tpATR
+    if longTrailOn
+        trailOff = atr * trailOffsetATR
+        strategy.exit("L-Exit", "Long", trail_price=close, trail_offset=trailOff)
+    else
+        strategy.exit("L-Exit", "Long", stop=sl, limit=tp)
+
+if strategy.position_size < 0
+    avg = strategy.position_avg_price
+    sl = na(breakevenStop) ? (avg + atr * stopATR) : math.min(breakevenStop, avg + atr * stopATR)
+    tp = avg - atr * tpATR
+    if shortTrailOn
+        trailOff = atr * trailOffsetATR
+        strategy.exit("S-Exit", "Short", trail_price=close, trail_offset=trailOff)
+    else
+        strategy.exit("S-Exit", "Short", stop=sl, limit=tp)
+
+var int lastLabelBar = na
+
+if showLabels and (na(lastLabelBar) or (bar_index - lastLabelBar >= minBarsBetweenLabels))
+    if chochUp
+        label.new(bar_index, low, "CHOCH UP\n" + state, style=label.style_label_up, textcolor=color.white, color=color.new(color.green, 0))
+        lastLabelBar := bar_index
+    else if chochDn
+        label.new(bar_index, high, "CHOCH DN\n" + state, style=label.style_label_down, textcolor=color.white, color=color.new(color.red, 0))
+        lastLabelBar := bar_index
+    else if longRunner
+        label.new(bar_index, low, "BOS UP\nRUNNER", style=label.style_label_up, textcolor=color.white, color=color.new(color.lime, 0))
+        lastLabelBar := bar_index
+    else if shortRunner
+        label.new(bar_index, high, "BOS DN\nRUNNER", style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 0))
+        lastLabelBar := bar_index
+    else if longScalp
+        label.new(bar_index, low, "BOS UP\nSCALP", style=label.style_label_up, textcolor=color.white, color=color.new(color.teal, 0))
+        lastLabelBar := bar_index
+    else if shortScalp
+        label.new(bar_index, high, "BOS DN\nSCALP", style=label.style_label_down, textcolor=color.white, color=color.new(color.purple, 0))
+        lastLabelBar := bar_index
+
+if showStateTable and barstate.islast
+    var table t = table.new(position.top_right, 2, 31, bgcolor=color.new(color.white, 15), border_width=1)
+    table.cell(t, 0, 0, "State", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 0, state, text_color=color.black)
+    table.cell(t, 0, 1, "ATR OK", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 1, str.tostring(atrOk), text_color=atrOk ? color.green : color.red)
+    table.cell(t, 0, 2, "Regime OK", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 2, str.tostring(regimeOk) + " (ADX:" + str.tostring(adx, "#.#") + ")", text_color=regimeOk ? color.green : color.red)
+    table.cell(t, 0, 3, "Regime Soft", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 3, str.tostring(regimeSoftOk) + " (Gate:" + str.tostring(softAdxGate, "#.#") + ")", text_color=regimeSoftOk ? color.green : color.orange)
+    table.cell(t, 0, 4, "Session OK", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 4, str.tostring(sessionOk), text_color=sessionOk ? color.green : color.red)
+    table.cell(t, 0, 5, "Trend Mode", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 5, trendMode, text_color=color.black)
+    table.cell(t, 0, 6, "HTF Up", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 6, str.tostring(htfUp), text_color=htfUp ? color.green : color.red)
+    table.cell(t, 0, 7, "HTF Dn", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 7, str.tostring(htfDn), text_color=htfDn ? color.green : color.red)
+    table.cell(t, 0, 8, "LTF Up", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 8, str.tostring(ltfUp), text_color=ltfUp ? color.green : color.red)
+    table.cell(t, 0, 9, "LTF Dn", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 9, str.tostring(ltfDn), text_color=ltfDn ? color.green : color.red)
+    table.cell(t, 0, 10, "Trend OK (L)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 10, str.tostring(trendOkLong), text_color=trendOkLong ? color.green : color.red)
+    table.cell(t, 0, 11, "Trend OK (S)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 11, str.tostring(trendOkShort), text_color=trendOkShort ? color.green : color.red)
+    table.cell(t, 0, 12, "Pullback OK", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 12, str.tostring(pullbackOk), text_color=pullbackOk ? color.green : color.orange)
+    table.cell(t, 0, 13, "BOS UP Scalp", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 13, str.tostring(bosUpScalp), text_color=bosUpScalp ? color.green : color.red)
+    table.cell(t, 0, 14, "BOS UP Runner", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 14, str.tostring(bosUpRunner), text_color=bosUpRunner ? color.green : color.red)
+    table.cell(t, 0, 15, "BOS DN Scalp", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 15, str.tostring(bosDnScalp), text_color=bosDnScalp ? color.green : color.red)
+    table.cell(t, 0, 16, "BOS DN Runner", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 16, str.tostring(bosDnRunner), text_color=bosDnRunner ? color.green : color.red)
+    table.cell(t, 0, 17, "Long Runner", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 17, str.tostring(longRunner), text_color=longRunner ? color.green : color.red)
+    table.cell(t, 0, 18, "Short Runner", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 18, str.tostring(shortRunner), text_color=shortRunner ? color.green : color.red)
+    table.cell(t, 0, 19, "Long Scalp", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 19, str.tostring(longScalp), text_color=longScalp ? color.green : color.red)
+    table.cell(t, 0, 20, "Short Scalp", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 20, str.tostring(shortScalp), text_color=shortScalp ? color.green : color.red)
+    table.cell(t, 0, 21, "Trades/Session", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 21, str.tostring(tradesThisSession) + " / " + str.tostring(maxTradesPerSession), text_color=color.black)
+    table.cell(t, 0, 22, "Cooldown OK", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 22, str.tostring(cooldownOk), text_color=cooldownOk ? color.green : color.red)
+    table.cell(t, 0, 23, "Mode", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 23, entryMode, text_color=color.black)
+    table.cell(t, 0, 24, "Net PnL", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 24, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit > 0 ? color.green : strategy.netprofit < 0 ? color.red : color.gray)
+    table.cell(t, 0, 25, "Latest Swing High", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 25, str.tostring(latestHighForBOS, "#.##"), text_color=na(latestHighForBOS) ? color.red : color.black)
+    table.cell(t, 0, 26, "Latest Swing Low", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 26, str.tostring(latestLowForBOS, "#.##"), text_color=na(latestLowForBOS) ? color.red : color.black)
+    table.cell(t, 0, 27, "DN dist (Scalp)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 27, str.tostring(dnDistScalp, "#.##"), text_color=na(dnDistScalp) ? color.gray : (dnDistScalp <= 0 ? color.green : color.red))
+    table.cell(t, 0, 28, "DN dist (Runner)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 28, str.tostring(dnDistRunner, "#.##"), text_color=na(dnDistRunner) ? color.gray : (dnDistRunner <= 0 ? color.green : color.red))
+    table.cell(t, 0, 29, "UP dist (Scalp)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 29, str.tostring(upDistScalp, "#.##"), text_color=na(upDistScalp) ? color.gray : (upDistScalp <= 0 ? color.green : color.red))
+    table.cell(t, 0, 30, "UP dist (Runner)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 30, str.tostring(upDistRunner, "#.##"), text_color=na(upDistRunner) ? color.gray : (upDistRunner <= 0 ? color.green : color.red))
+    table.cell(t, 0, 10, "Trend OK (L)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 10, str.tostring(trendOkLong), text_color=trendOkLong ? color.green : color.red)
+    table.cell(t, 0, 11, "Trend OK (S)", text_color=color.black, bgcolor=color.new(color.gray, 85))
+    table.cell(t, 1, 11, str.tostring(trendOkShort), text_color=trendOkShort ? color.green : color.red)
+
+if longRunner
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"BUY","price":' + str.tostring(close, "#.####") + ',"mode":"RUNNER","structure":"BOS_RUNNER","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+if shortRunner
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"SELL","price":' + str.tostring(close, "#.####") + ',"mode":"RUNNER","structure":"BOS_RUNNER","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+if longScalp
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"BUY","price":' + str.tostring(close, "#.####") + ',"mode":"SCALP","structure":"BOS_SCALP","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+if shortScalp
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"SELL","price":' + str.tostring(close, "#.####") + ',"mode":"SCALP","structure":"BOS_SCALP","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+if chochUp and showLabels
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"NEUTRAL","price":' + str.tostring(close, "#.####") + ',"mode":"NONE","structure":"CHOCH_UP","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+if chochDn and showLabels
+    alertMsg = '{"symbol":"' + syminfo.ticker + '","action":"NEUTRAL","price":' + str.tostring(close, "#.####") + ',"mode":"NONE","structure":"CHOCH_DN","state":"' + state + '","timeframe":"' + timeframe.period + '","timestamp":' + str.tostring(time) + '}'
+    alert(alertMsg, alert.freq_once_per_bar)
+
+// ============================================================================
+// TUNING GUIDE FOR XAUUSD 5m
+// ============================================================================
+// STARTING PARAMETERS (Conservative):
+// - ATR Gate: 0.65 (allows trades in moderate volatility)
+// - ADX Threshold: 20 (strict for CHOCH, soft for entries = 15)
+// - Stop ATR: 1.20 (tight stop for 5m)
+// - TP Scalp: 0.80 (quick scalps)
+// - TP Runner: 2.50 (let winners run)
+// - Max Trades/Session: 10
+//
+// TO INCREASE TRADES/DAY:
+// - Lower ATR Gate: 0.60 (more opportunities)
+// - Lower ADX Threshold: 15-18 (less strict regime filter)
+// - Reduce minBarsBetweenBOS: 2-3 (faster re-entry)
+// - Increase maxTradesPerSession: 12-15
+// - Reduce cooldownBars: 2-3
+//
+// TO REDUCE DRAWDOWN:
+// - Raise ATR Gate: 0.70-0.75 (only trade in higher volatility)
+// - Raise ADX Threshold: 22-25 (only trade in strong trends)
+// - Tighten Stop ATR: 1.00-1.10 (faster exits)
+// - Reduce TP Runner: 2.00-2.20 (take profits sooner)
+// - Reduce maxTradesPerSession: 6-8
+//
+// ADX THRESHOLD RANGES:
+// - 15-18: More trades, some in choppy markets
+// - 20-22: Balanced (recommended starting point)
+// - 25-30: Very selective, only strong trends
+//
+// ATR GATE RANGES:
+// - 0.60-0.65: More trades, includes low volatility periods
+// - 0.70-0.75: Balanced, filters out compression
+// - 0.80-0.85: Very selective, only expansion periods
+//
+// NOTE: Soft regime filter (useSoftRegimeForEntries) allows entries when
+// ADX >= max(10, adxThreshold - 5), so with threshold=20, entries allowed
+// when ADX >= 15. This prevents zero trades in sideways markets while
+// still filtering out extreme chop (ADX < 10).
