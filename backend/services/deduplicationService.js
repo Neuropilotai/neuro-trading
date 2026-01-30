@@ -50,7 +50,7 @@ class DeduplicationService {
   }
 
   /**
-   * Check if alert is duplicate
+   * Check if alert is duplicate (read-only check, does NOT mark as seen)
    * @param {object} alertData - Alert payload
    * @returns {{isDuplicate: boolean, idempotencyKey: string}} - Check result
    */
@@ -62,7 +62,7 @@ class DeduplicationService {
     const idempotencyKey = this.generateIdempotencyKey(alertData);
     const now = Date.now();
 
-    // Check cache
+    // Check cache (read-only)
     const cached = this.cache.get(idempotencyKey);
     
     if (cached) {
@@ -78,15 +78,30 @@ class DeduplicationService {
       }
     }
 
-    // Not a duplicate, add to cache
+    // Not a duplicate (but NOT marked as seen yet - that happens on success)
+    return { isDuplicate: false, idempotencyKey };
+  }
+
+  /**
+   * Mark alert as processed (call this only when request is successfully accepted)
+   * Idempotent: safe to call multiple times with the same key (updates timestamp)
+   * @param {string} idempotencyKey - Idempotency key to mark as processed
+   */
+  async markAsProcessed(idempotencyKey) {
+    if (!this.enabled || !idempotencyKey) {
+      return;
+    }
+
+    const now = Date.now();
+    
+    // Mark as processed (idempotent: if key exists, just update timestamp)
     this.cache.set(idempotencyKey, now);
     
-    // Persist to file (async, don't wait)
+    // Persist to file (async, don't wait, always swallow errors)
     this.saveCache().catch(err => {
       console.warn('⚠️  Could not save deduplication cache:', err.message);
+      // Swallow error - in-memory cache is still updated
     });
-
-    return { isDuplicate: false, idempotencyKey };
   }
 
   /**
@@ -162,6 +177,34 @@ class DeduplicationService {
       size: this.cache.size,
       ttl: this.ttl
     };
+  }
+
+  /**
+   * Get sample keys from cache (for dev endpoints)
+   * @param {number} maxKeys - Maximum number of keys to return
+   * @returns {Array<string>} - Array of idempotency keys
+   */
+  getSampleKeys(maxKeys = 20) {
+    const keys = Array.from(this.cache.keys());
+    return keys.slice(0, maxKeys);
+  }
+
+  /**
+   * Clear cache (for dev endpoints)
+   * @returns {number} - Number of keys cleared
+   */
+  clearCache() {
+    const count = this.cache.size;
+    this.cache.clear();
+    return count;
+  }
+
+  /**
+   * Get cache file path
+   * @returns {string} - Cache file path
+   */
+  getCacheFilePath() {
+    return this.cacheFile;
   }
 }
 

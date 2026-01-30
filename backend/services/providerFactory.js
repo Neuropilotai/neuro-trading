@@ -17,6 +17,21 @@ class ProviderFactory {
    * Get provider for symbol
    */
   getProvider(symbolMetadata) {
+    const symbolRouter = require('./symbolRouter');
+    // Extract symbol from metadata (could be symbol, symbolName, or passed directly)
+    const symbol = symbolMetadata.symbol || symbolMetadata.symbolName || (typeof symbolMetadata === 'string' ? symbolMetadata : '');
+    
+    // Check if symbol should use Binance
+    if (symbol && !symbolRouter.shouldFetchFromBinance(symbol)) {
+      // Return a no-op provider for TradingView-only symbols
+      // This prevents Binance API calls
+      if (!this.providers.has('tradingview_only')) {
+        const TradingViewOnlyProvider = require('./providers/tradingViewOnlyProvider');
+        this.providers.set('tradingview_only', new TradingViewOnlyProvider());
+      }
+      return this.providers.get('tradingview_only');
+    }
+    
     const providerName = symbolMetadata.provider || this.defaultProvider;
     
     if (this.providers.has(providerName)) {
