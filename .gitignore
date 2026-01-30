@@ -141,3 +141,9 @@ tests/validate_pattern_filtering.js
 # Trading runtime logs
 TradingDrive/
 *.log
+
+# Env files
+.env
+.env.*
+!.env.example
+!TRADING_ENV.example
