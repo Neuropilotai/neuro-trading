@@ -49,6 +49,12 @@ class PatternLearningEngine {
     if (!this.enabled) return { processed: 0, patterns: 0 };
 
     try {
+      // Skip TradingView-only symbols early (provider returns empty array anyway, but skip processing)
+      const symbolRouter = require('./symbolRouter');
+      if (!symbolRouter.shouldFetchFromBinance(symbol)) {
+        return { processed: 0, patterns: 0, reason: 'tradingview_only' };
+      }
+      
       // Get last processed timestamp
       const lastProcessed = await checkpointManager.getLastProcessed(symbol, timeframe);
       

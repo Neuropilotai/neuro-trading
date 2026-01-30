@@ -166,7 +166,15 @@ class LearningDaemon {
       const startTime = Date.now();
 
       // Get all symbol/timeframe pairs
-      const pairs = universeLoader.getSymbolTimeframePairs();
+      const allPairs = universeLoader.getSymbolTimeframePairs();
+      
+      // Filter to only Binance symbols for scanning (if autotrader enabled)
+      const symbolRouter = require('./symbolRouter');
+      const enableAutotrader = process.env.ENABLE_AUTOTRADER !== 'false';
+      
+      const pairs = enableAutotrader 
+        ? allPairs.filter(p => symbolRouter.shouldScanSymbol(p.symbol))
+        : [];
       
       // Process with concurrency limit
       const results = await this.processWithConcurrency(pairs, this.concurrency);
@@ -256,6 +264,8 @@ class LearningDaemon {
     
     try {
       const metadata = universeLoader.getSymbolMetadata(symbol);
+      // Add symbol to metadata for routing
+      metadata.symbol = symbol;
       const provider = providerFactory.getProvider(metadata);
       const maxBars = universeLoader.getMaxHistoryBars(timeframe);
 
