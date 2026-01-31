@@ -264,6 +264,25 @@ class EvaluationDatabase {
   }
 
   /**
+   * Check if trade-pattern attribution already exists
+   * @param {string} tradeId - Trade ID
+   * @param {string} patternId - Pattern ID
+   * @returns {Promise<boolean>} - True if attribution exists
+   */
+  async tradePatternAttributionExists(tradeId, patternId) {
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(`${tradeId}|${patternId}`).digest('hex');
+    const attributionId = `attr_${hash.substring(0, 16)}`;
+    
+    const existing = await this.getAsync(
+      'SELECT id FROM trade_pattern_attribution WHERE id = ?',
+      [attributionId]
+    );
+    
+    return !!existing;
+  }
+
+  /**
    * Save trade-pattern attribution (idempotent)
    */
   async saveTradePatternAttribution(tradeId, patternId, attribution) {
@@ -425,15 +444,17 @@ class EvaluationDatabase {
     const rows = await this.allAsync(query, [minSampleSize, minWinRate]);
     
     // Filter by profit_factor
-    // NULL profit_factor means "perfect" (no losses) - should always pass any threshold
-    // because infinite profit factor (no losses) exceeds any finite threshold
+    // NULL profit_factor means "no data" or "no losses yet" - conservative approach:
+    // NULL should FAIL when threshold > 0 (safer for trading - don't promote unknown patterns)
+    // NULL only passes when threshold is 0 (explicitly allowing all patterns)
     const validated = rows
       .filter(row => {
         const pf = row.profit_factor;
         if (pf === null || pf === undefined) {
-          // NULL means perfect (no losses) = infinite profit factor
-          // This should always pass any threshold
-          return true;
+          // NULL = no data or insufficient data
+          // Only pass if threshold is 0 (explicitly allowing all)
+          // This is safer - don't promote patterns with unknown PF
+          return minProfitFactor === 0;
         }
         return pf >= minProfitFactor;
       })

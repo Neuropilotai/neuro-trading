@@ -300,7 +300,7 @@ describe('Pattern Performance Filtering', () => {
       });
       assert.strictEqual(validated1.includes(patternId1), true, 'NULL profit_factor should pass when threshold is 0');
 
-      // With minProfitFactor = 1.0, NULL should pass (treated as infinite)
+      // With minProfitFactor = 1.0, NULL should FAIL (conservative: no data = reject)
       const validated2 = await evaluationDb.getValidatedPatterns({
         minWinRate: 0.50,
         minProfitFactor: 1.0,
@@ -308,8 +308,8 @@ describe('Pattern Performance Filtering', () => {
       });
       assert.strictEqual(
         validated2.includes(patternId2),
-        true,
-        'NULL profit_factor (treated as infinite) should pass any positive threshold'
+        false,
+        'NULL profit_factor should fail when threshold > 0 (conservative: no data = reject)'
       );
     });
   });

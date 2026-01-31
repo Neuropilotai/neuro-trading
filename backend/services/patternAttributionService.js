@@ -22,7 +22,11 @@ class PatternAttributionService {
     for (const pattern of patterns) {
       if (!pattern.patternId) continue; // Skip if no pattern ID
       
-      // Save attribution
+      // Check if this trade-pattern attribution already exists (idempotency check)
+      // This prevents double-counting on webhook retries
+      const isNewAttribution = !(await evaluationDb.tradePatternAttributionExists(tradeId, pattern.patternId));
+      
+      // Save attribution (INSERT OR REPLACE ensures idempotency)
       await evaluationDb.saveTradePatternAttribution(tradeId, pattern.patternId, {
         patternConfidence: pattern.confidence || 0,
         tradePnL: tradeResult.pnl,
