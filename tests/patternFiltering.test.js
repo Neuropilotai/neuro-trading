@@ -277,7 +277,7 @@ describe('Pattern Performance Filtering', () => {
         firstSeenDate: new Date().toISOString()
       });
 
-      // Pattern with NULL profit_factor and minProfitFactor = 1.0 (should pass — NULL treated as infinite PF)
+      // Pattern with NULL profit_factor and minProfitFactor = 1.0 (should FAIL — NULL treated as insufficient data, conservative)
       await evaluationDb.updatePatternPerformance(patternId2, {
         patternType: 'double_bottom',
         symbol: 'TSLA',
