@@ -1,0 +1,56 @@
+# TradingView Webhook Server - Environment Variables
+# Copy this file to .env and fill in your values
+
+# ===== Server Configuration =====
+PORT=3001
+NODE_ENV=development
+
+# ===== Webhook Security =====
+TRADINGVIEW_WEBHOOK_SECRET=YOUR_SECRET_HERE
+ENABLE_WEBHOOK_AUTH=true
+ENABLE_WEBHOOK_VALIDATION=true
+ENABLE_WEBHOOK_DEDUPE=true
+
+# ===== Risk Management =====
+ENABLE_RISK_ENGINE=true
+TRADING_ENABLED=true
+MAX_DAILY_LOSS_PERCENT=2.0
+MAX_POSITION_SIZE_PERCENT=25.0
+MAX_OPEN_POSITIONS=5
+REQUIRE_STOP_LOSS=true
+REQUIRE_TAKE_PROFIT=false
+
+# ===== Account =====
+ACCOUNT_BALANCE=500
+
+# ===== Trade Ledger =====
+ENABLE_TRADE_LEDGER=true
+LEDGER_DB_PATH=./data/ledger.sqlite
+
+# ===== Broker Configuration =====
+BROKER_TYPE=paper
+ENABLE_PAPER_TRADING=true
+
+# ===== Symbol Cooldown =====
+SYMBOL_COOLDOWN_MS=180000
+
+# ===== Guard Order Configuration =====
+GUARD_ORDER=position_first
+
+# ===== TradingView-Only Execution Allowlist =====
+ALLOW_TRADINGVIEW_ONLY_EXECUTION=false
+TRADINGVIEW_ONLY_SYMBOL_ALLOWLIST=
+
+# ===== Dev Endpoints =====
+ENABLE_DEV_ENDPOINTS=false
+
+# ===== Rate Limiting =====
+WEBHOOK_RATE_LIMIT=10
+# Requests per minute per IP
+
+# ===== Security =====
+# Request body size limit (bytes, default: 1MB)
+WEBHOOK_MAX_BODY_SIZE=1048576
+# CORS origin (default: * for dev, set specific origin for prod)
+CORS_ORIGIN=*
+
