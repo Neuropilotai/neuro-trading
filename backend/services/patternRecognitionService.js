@@ -45,8 +45,8 @@ class PatternRecognitionService {
       ]
     };
     
-    // Load patterns from storage
-    this.loadPatterns();
+    // Lazy-load patterns only when detectPatterns() is called (not during module import)
+    this._patternsLoaded = false;
   }
 
   /**
@@ -59,6 +59,12 @@ class PatternRecognitionService {
   async detectPatterns(symbol, marketData, timeframe = '5min') {
     if (!this.enabled) {
       return [];
+    }
+
+    // Lazy-load patterns only when needed (not during module import/tests)
+    if (!this._patternsLoaded) {
+      await this.loadPatterns();
+      this._patternsLoaded = true;
     }
 
     try {
