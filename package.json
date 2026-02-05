@@ -1,31 +1,12 @@
 {
-  "name": "neuro-pilot-ai-trading",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Trading system only - isolated from inventory system",
+  "name": "neuro-trading-public-template",
+  "version": "0.1.0",
+  "private": false,
+  "type": "commonjs",
   "scripts": {
-    "start": "node simple_webhook_server.js",
-    "daemon:start": "node backend/services/learningDaemon.js",
-    "daemon:stop": "pkill -f learningDaemon || true",
-    "daemon:status": "curl -s http://localhost:3014/learn/status | jq . || echo 'Daemon not running'",
-    "verify:webhook": "./scripts/verify_tradingview_webhook.sh",
-    "verify:status": "curl -s http://localhost:3014/health | jq . || echo 'Server not running'",
-    "backtest": "node cli/backtest.js",
-    "walkforward": "node cli/walkforward.js",
-    "test": "mocha \"tests/**/*.test.js\" --timeout 30000",
-    "test:ledger": "mocha \"tests/tradeLedger.test.js\"",
-    "smoke": "node cli/smoke_pattern_pipeline.js"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "devDependencies": {
-    "mocha": "^11.7.5"
+    "start": "node server.js"
   },
   "dependencies": {
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.2.1",
-    "sqlite3": "^5.1.7"
+    "express": "^4.22.1"
   }
 }
