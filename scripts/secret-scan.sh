@@ -36,7 +36,7 @@ scan() {
     if [ -f "$file" ]; then
       # -S = smart case, -n = line numbers, show file path
       if rg -n -S --no-heading --color=never "$pattern" "$file" 2>/dev/null \
-          | rg -n -S --no-heading --color=never -v 'YOUR_SECRET_HERE' 2>/dev/null \
+          | rg -n -S --no-heading --color=never -v 'YOUR_SECRET_HERE|\[CHANGE_ME\]|\[DEV_SECRET_PLACEHOLDER\]|\[YOUR_TRADINGVIEW_WEBHOOK_SECRET\]|your-secure-password|paper_trading|\$TRADINGVIEW_WEBHOOK_SECRET|\$SECRET|invalid_secret' 2>/dev/null \
           | sed "s|^|$file:|"; then
         found=1
         HITS=1
@@ -44,10 +44,8 @@ scan() {
     fi
   done < <(git ls-files)
 
-  # Return code handling: 0 = found matches, 1 = no matches (OK), 2 = error
-  if [ "$found" -eq 0 ]; then
-    return 1
-  fi
+  # Always return 0 - HITS is updated when matches are found
+  # The main script checks HITS at the end to determine exit code
   return 0
 }
 

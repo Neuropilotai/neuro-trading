@@ -39,7 +39,7 @@ curl -s http://localhost:3001/health | grep -E '"openPositions"|"totalTrades"|"b
 ```bash
 curl -s -X POST http://localhost:3001/webhook/tradingview \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"OANDA:XAUUSD","action":"BUY","price":2050,"quantity":0.1,"alert_id":"test_xau_1","timestamp":1738230000,"secret":"dev_tradingview_secret_123"}'
+  -d '{"symbol":"OANDA:XAUUSD","action":"BUY","price":2050,"quantity":0.1,"alert_id":"test_xau_1","timestamp":1738230000,"secret":"[DEV_SECRET_PLACEHOLDER]"}'
 ```
 
 **Expected:**
@@ -60,7 +60,7 @@ grep -E "^TRADING_ENABLED|^PAPER_STATE_REBUILD_ON_BOOT|^PAPER_STATE_RESET_ON_BOO
 TRADING_ENABLED=false
 PAPER_STATE_REBUILD_ON_BOOT=true
 PAPER_STATE_RESET_ON_BOOT=false
-TRADINGVIEW_WEBHOOK_SECRET=dev_tradingview_secret_123
+TRADINGVIEW_WEBHOOK_SECRET=[DEV_SECRET_PLACEHOLDER]
 ```
 
 ## 7. Check Server Logs for Rebuild Message

@@ -99,7 +99,7 @@
 2. **Webhook URL Tab:**
    - **Webhook URL:** `https://your-ngrok-url.ngrok.io/webhook/tradingview`
      - (Replace with your actual ngrok URL - see Step 8)
-   - **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+   - **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 
 3. **Message Tab:**
    - **Alert Message:** Copy this exactly:
@@ -135,7 +135,7 @@
 2. **Start your server** (if not running):
    ```bash
    cd /Users/davidmikulis/neuro-pilot-ai
-   export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+   export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
    node simple_webhook_server.js
    ```
 
@@ -232,7 +232,7 @@
 - Webhook: `http://localhost:3014/webhook/tradingview` (use ngrok URL in TradingView)
 
 **Secrets:**
-- Webhook Secret: `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+- Webhook Secret: `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 
 ---
 

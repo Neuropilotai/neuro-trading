@@ -5,7 +5,7 @@ console.log('='.repeat(60));
 
 const baseURL = 'http://localhost:8443';
 const testEmail = 'neuro.pilot.ai@gmail.com';
-const testPassword = 'EnterpriseSecure2024!';
+const testPassword = '[CHANGE_ME]';
 
 async function testAuthentication() {
     try {

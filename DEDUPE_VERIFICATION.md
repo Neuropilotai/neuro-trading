@@ -37,7 +37,7 @@ curl -s -X POST http://localhost:3001/api/dedupe/reset | jq .
 # 2. Send webhook with TRADING_ENABLED=false
 curl -i -s -X POST http://localhost:3001/webhook/tradingview \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.01,"alert_id":"test_retry_1","timestamp":1738230000,"secret":"dev_tradingview_secret_123"}'
+  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.01,"alert_id":"test_retry_1","timestamp":1738230000,"secret":"[DEV_SECRET_PLACEHOLDER]"}'
 
 # Expected: HTTP 403
 
@@ -49,7 +49,7 @@ curl -s http://localhost:3001/api/dedupe/stats | jq .
 # 4. Retry same webhook
 curl -i -s -X POST http://localhost:3001/webhook/tradingview \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.01,"alert_id":"test_retry_1","timestamp":1738230000,"secret":"dev_tradingview_secret_123"}'
+  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.01,"alert_id":"test_retry_1","timestamp":1738230000,"secret":"[DEV_SECRET_PLACEHOLDER]"}'
 
 # Expected: HTTP 403 again (NOT 409)
 ```

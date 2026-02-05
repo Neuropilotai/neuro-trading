@@ -91,7 +91,7 @@ return res.status(401).json({ ... });
 
 **Example:**
 ```json
-{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
 ```
 
 ---
@@ -132,7 +132,7 @@ return res.status(401).json({ ... });
 
 ```bash
 # Set secret
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 
 # Start server
 node simple_webhook_server.js
@@ -140,7 +140,7 @@ node simple_webhook_server.js
 # Test valid body secret (should return 200)
 curl -X POST http://localhost:3014/webhook/tradingview \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-1","timestamp":1234567890,"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}'
+  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-1","timestamp":1234567890,"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}'
 
 # Test invalid body secret (should return 401)
 curl -X POST http://localhost:3014/webhook/tradingview \
@@ -150,7 +150,7 @@ curl -X POST http://localhost:3014/webhook/tradingview \
 # Test missing required fields with valid secret (should return 400)
 curl -X POST http://localhost:3014/webhook/tradingview \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}'
+  -d '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}'
 
 # Run full verification suite
 ./scripts/verify_tradingview_webhook.sh

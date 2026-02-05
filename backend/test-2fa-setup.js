@@ -4,7 +4,7 @@ const http = require('http');
 async function setup2FA() {
   const loginData = JSON.stringify({
     email: 'neuro.pilot.ai@gmail.com',
-    password: 'EnterpriseSecure2024!'
+    password: '[CHANGE_ME]'
   });
 
   // First, let's try to get a token by logging in without 2FA requirement

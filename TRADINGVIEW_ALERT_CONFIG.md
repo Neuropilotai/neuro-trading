@@ -70,7 +70,7 @@ This script will:
 ```bash
 # Terminal 1: Start server (if not running)
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 node simple_webhook_server.js
 
 # Terminal 2: Start ngrok
@@ -102,7 +102,7 @@ For 24/7 operation, deploy to:
 3. **Webhook URL Tab:**
    - **Webhook URL:** `https://your-ngrok-url.ngrok.io/webhook/tradingview`
      - Replace with your actual ngrok URL from Step 2
-   - **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+   - **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 
 4. **Message Tab:**
    - **Option A (HMAC Header Auth - Recommended):**
@@ -113,7 +113,7 @@ For 24/7 operation, deploy to:
    - **Option B (Body Secret Auth - Alternative):**
      - Copy from `ALERT_MESSAGE_BUY_WITH_SECRET.txt`:
      ```
-     {"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+     {"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
      ```
    - **Important:** Paste exactly as shown (no arithmetic in JSON)
 
@@ -131,7 +131,7 @@ Repeat the same steps, but:
   ```
   or with secret:
   ```
-  {"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+  {"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
   ```
 
 ---
@@ -142,7 +142,7 @@ Repeat the same steps, but:
 
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/verify_tradingview_webhook.sh
 ```
 
@@ -280,7 +280,7 @@ The webhook server supports **two authentication methods**:
 **If using Body Secret Auth:**
 - ✅ Verify `"secret"` field in alert message matches `TRADINGVIEW_WEBHOOK_SECRET`
 - ✅ Check secret is included in JSON payload (not in header)
-- ✅ Ensure secret value is exactly: `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+- ✅ Ensure secret value is exactly: `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 - ✅ Check server logs for "Invalid body secret" messages
 
 **General:**
@@ -370,12 +370,12 @@ The webhook server supports **two authentication methods**:
 **Method 2: Body Secret Auth (Alternative):**
 - **BUY Alert** (`ALERT_MESSAGE_BUY_WITH_SECRET.txt`):
 ```json
-{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
 ```
 
 - **SELL Alert** (`ALERT_MESSAGE_SELL_WITH_SECRET.txt`):
 ```json
-{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
 ```
 
 **Important Notes:**
@@ -411,7 +411,7 @@ The webhook server supports **two authentication methods**:
 
 ### Secrets
 
-- **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+- **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 - Set in server: `export TRADINGVIEW_WEBHOOK_SECRET=...`
 - Set in TradingView: "Webhook Secret" field in alert settings
 
@@ -570,12 +570,12 @@ If you're using body secret auth (instead of HMAC header), use these templates:
 
 **BUY Alert Message:**
 ```json
-{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
 ```
 
 **SELL Alert Message:**
 ```json
-{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"}
+{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}},"secret":"[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"}
 ```
 
 **Note:** The secret is automatically removed from the body after authentication and never logged or stored.

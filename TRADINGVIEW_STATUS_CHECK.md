@@ -72,7 +72,7 @@ lsof -ti:3014 | xargs kill -9
 
 # Start server
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 node simple_webhook_server.js
 ```
 
@@ -91,7 +91,7 @@ nohup node simple_webhook_server.js > server.log 2>&1 &
 screen -S trading-server
 
 # Inside screen:
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 node simple_webhook_server.js
 
 # Detach: Ctrl+A, then D
@@ -211,7 +211,7 @@ sqlite3 ./data/trade_ledger.db "SELECT * FROM trades WHERE status = 'REJECTED' O
 3. ✅ Restart server:
    ```bash
    lsof -ti:3014 | xargs kill -9
-   export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+   export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
    node simple_webhook_server.js
    ```
 
@@ -314,7 +314,7 @@ sqlite3 ./data/trade_ledger.db "SELECT * FROM trades WHERE status = 'REJECTED' O
    echo $TRADINGVIEW_WEBHOOK_SECRET
    
    # Should match TradingView alert settings
-   # Expected: 11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+   # Expected: [YOUR_TRADINGVIEW_WEBHOOK_SECRET]
    ```
 
 2. ✅ Verify signature format:
@@ -361,7 +361,7 @@ sqlite3 ./data/trade_ledger.db "SELECT trade_id, symbol, action, status, created
 
 ### Full Verification
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/verify_tradingview_webhook.sh
 ```
 

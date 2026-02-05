@@ -22,14 +22,14 @@ This will:
 **Terminal 1 - Start Server:**
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 node simple_webhook_server.js
 ```
 
 **Terminal 2 - Run Tests:**
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./test_system.sh
 ```
 

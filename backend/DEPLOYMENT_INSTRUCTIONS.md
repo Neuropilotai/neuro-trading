@@ -162,7 +162,7 @@ To create a bcrypt hash for your password:
 ```javascript
 // Use this Node.js script
 const bcrypt = require('bcrypt');
-const password = 'your-secure-password';
+const password = '[CHANGE_ME]';
 bcrypt.hash(password, 12).then(hash => console.log(hash));
 ```
 

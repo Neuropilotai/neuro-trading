@@ -7,7 +7,7 @@ The **Enterprise Secure Inventory System** now includes comprehensive user manag
 ## 🔐 Current Superuser Credentials
 
 **Email:** `neuro.pilot.ai@gmail.com`
-**Password:** `EnterpriseSecure2024!`
+**Password:** `[CHANGE_ME]`
 **Role:** `SUPER_ADMIN` (Level 100)
 **Access:** Full system control with user management
 
@@ -95,7 +95,7 @@ Content-Type: application/json
 
 {
   "email": "user@company.com",
-  "password": "SecurePassword2024!",
+  "password": "[CHANGE_ME]",
   "role": "MANAGER",
   "firstName": "John",
   "lastName": "Doe",
@@ -270,7 +270,7 @@ curl -X POST http://localhost:8443/api/users \
   -H "Content-Type: application/json" \
   -d '{
     "email": "sarah.johnson@company.com",
-    "password": "SafePassword2024!",
+    "password": "[CHANGE_ME]",
     "role": "MANAGER",
     "firstName": "Sarah",
     "lastName": "Johnson",

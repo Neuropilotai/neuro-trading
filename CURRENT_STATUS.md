@@ -75,7 +75,7 @@ curl -X POST http://localhost:3014/webhook/tradingview \
 ```bash
 # Generate signature first
 PAYLOAD='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"stop_loss":49000,"take_profit":51000,"alert_id":"test-valid-1","timestamp":1234567890}'
-SECRET="11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"
+SECRET="[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"
 SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
 
 curl -X POST http://localhost:3014/webhook/tradingview \
@@ -105,7 +105,7 @@ sqlite3 ./data/trade_ledger.db "SELECT trade_id, symbol, action, quantity, price
 Run the full test suite to verify everything works:
 
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./test_system.sh
 ```
 

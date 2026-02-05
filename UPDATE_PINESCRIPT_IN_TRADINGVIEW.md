@@ -113,7 +113,7 @@ alertcondition(super_long_signal, "🎯 Elite AI Long", webhook_json_buy)
 ./scripts/get_public_webhook_url.sh
 
 # 2. Run operations check
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/tradingview_ops.sh
 
 # 3. Trigger a test alert in TradingView

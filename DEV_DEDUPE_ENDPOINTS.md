@@ -102,7 +102,7 @@ curl -s -X POST http://localhost:3001/webhook/tradingview \
     "quantity":0.01,
     "alert_id":"test_duplicate_1",
     "timestamp":1738230000,
-    "secret":"dev_tradingview_secret_123"
+    "secret":"[DEV_SECRET_PLACEHOLDER]"
   }' | jq .
 
 # Expected: HTTP 200, trade accepted
@@ -117,7 +117,7 @@ curl -s -X POST http://localhost:3001/webhook/tradingview \
     "quantity":0.01,
     "alert_id":"test_duplicate_1",
     "timestamp":1738230000,
-    "secret":"dev_tradingview_secret_123"
+    "secret":"[DEV_SECRET_PLACEHOLDER]"
   }' | jq .
 
 # Expected: HTTP 409, "Duplicate alert"
@@ -151,7 +151,7 @@ curl -s -X POST http://localhost:3001/webhook/tradingview \
     "quantity":0.01,
     "alert_id":"test_duplicate_1",
     "timestamp":1738230000,
-    "secret":"dev_tradingview_secret_123"
+    "secret":"[DEV_SECRET_PLACEHOLDER]"
   }' | jq .
 
 # Expected: HTTP 200, trade accepted (no longer duplicate)

@@ -205,7 +205,7 @@ curl -X POST http://localhost:3001/webhook/tradingview \
     "quantity": 0.1,
     "alert_id": "test_bos_1",
     "timestamp": 1738230000,
-    "secret": "dev_tradingview_secret_123",
+    "secret": "[DEV_SECRET_PLACEHOLDER]",
     "signal_type": "BOS",
     "atr_slope": 0.05,
     "atr_current": 0.0012,
@@ -222,7 +222,7 @@ curl -X POST http://localhost:3001/webhook/tradingview \
     "quantity": 0.1,
     "alert_id": "test_bos_2",
     "timestamp": 1738230001,
-    "secret": "dev_tradingview_secret_123",
+    "secret": "[DEV_SECRET_PLACEHOLDER]",
     "signal_type": "BOS",
     "atr_slope": -0.02,
     "atr_current": 0.0010,
@@ -244,7 +244,7 @@ for i in {1..4}; do
       \"quantity\": 0.1,
       \"alert_id\": \"test_bos_cooldown_$i\",
       \"timestamp\": $(date +%s),
-      \"secret\": \"dev_tradingview_secret_123\",
+      \"secret\": \"[DEV_SECRET_PLACEHOLDER]\",
       \"signal_type\": \"BOS\",
       \"atr_slope\": 0.05
     }"

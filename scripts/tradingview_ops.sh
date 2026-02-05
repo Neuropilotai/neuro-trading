@@ -68,7 +68,7 @@ else
     fail "No process listening on port ${PORT}"
     echo ""
     echo "   Start server with:"
-    echo "   export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"
+    echo "   export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]"
     echo "   node simple_webhook_server.js"
     echo ""
     exit 1
@@ -183,7 +183,7 @@ else
 fi
 echo ""
 echo "  [ ] 3. Verify Webhook Secret:"
-echo "      11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784"
+echo "      [YOUR_TRADINGVIEW_WEBHOOK_SECRET]"
 echo ""
 echo "  [ ] 4. Update Alert Message:"
 echo "      - BUY alert: Use template from ALERT_MESSAGE_BUY.txt"

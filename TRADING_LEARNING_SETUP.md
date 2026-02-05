@@ -148,7 +148,7 @@ curl http://localhost:3014/health | jq '.features.learning'
 ### 2. Send Test Trade
 
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 
 BODY='{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-learn-1","timestamp":'$(date +%s)',"secret":"'$TRADINGVIEW_WEBHOOK_SECRET'"}'
 

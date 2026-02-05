@@ -63,7 +63,7 @@ async function setup2FA() {
     console.log('1. Logging in to get authentication token...');
     const loginData = {
       email: 'neuro.pilot.ai@gmail.com',
-      password: 'EnterpriseSecure2024!'
+      password: '[CHANGE_ME]'
     };
 
     const loginResponse = await makeRequest('POST', '/api/auth/login', loginData);

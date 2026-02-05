@@ -62,7 +62,7 @@ Use this JSON format in the alert message:
 #### D. Set Webhook Secret
 
 1. In TradingView alert settings, find **"Webhook Secret"** or **"Secret"** field
-2. Enter: `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+2. Enter: `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
    - (Or use the secret from your `.env` file)
 
 ---
@@ -153,7 +153,7 @@ https://your-public-url.com/webhook/tradingview
 
 **Secret:**
 ```
-11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ```
 
 ---
@@ -257,7 +257,7 @@ Your system is:
 
 **Quick Reference:**
 - Webhook URL: `http://localhost:3014/webhook/tradingview` (local) or your public URL
-- Secret: `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+- Secret: `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 - Health Check: `http://localhost:3014/health`
 - Account: `http://localhost:3014/api/account`
 

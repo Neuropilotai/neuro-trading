@@ -8,7 +8,7 @@ async function testEndpointValues() {
   // Create auth payload
   const authPayload = JSON.stringify({
     email: 'neuro.pilot.ai@gmail.com',
-    password: 'securepass123'
+    password: '[CHANGE_ME]'
   });
 
   // Login to get token

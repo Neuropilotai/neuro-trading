@@ -12,7 +12,7 @@
 cd /Users/davidmikulis/neuro-pilot-ai
 
 # Set webhook secret
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 
 # Start server
 node simple_webhook_server.js
@@ -43,7 +43,7 @@ cd /Users/davidmikulis/neuro-pilot-ai
 
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/tradingview_ops.sh
 ```
 
@@ -93,7 +93,7 @@ This will show:
    - **Condition:** Select your strategy → `🎯 Elite AI Long`
      - If you don't see this option, ensure `enableWebhookExport` is true in strategy settings
    - **Webhook URL:** Paste from `tradingview_ops.sh` output (e.g., `https://abc123.ngrok.io/webhook/tradingview`)
-   - **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+   - **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
    - **Alert Message:** Will auto-populate with:
      ```
      {"symbol":"{{ticker}}","action":"BUY","price":{{close}},"quantity":0.1,"alert_id":"tv_{{time}}","timestamp":{{time}}}
@@ -167,7 +167,7 @@ curl -X POST <new-webhook-url> \
 
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/tradingview_ops.sh
 ```
 
@@ -248,7 +248,7 @@ node backend/scripts/dailyReport.js
 1. ✅ **Check webhook secret matches:**
    ```bash
    echo $TRADINGVIEW_WEBHOOK_SECRET
-   # Should be: 11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+   # Should be: [YOUR_TRADINGVIEW_WEBHOOK_SECRET]
    ```
 
 2. ✅ **Verify in TradingView:**
@@ -301,7 +301,7 @@ node backend/scripts/dailyReport.js
 3. ✅ **Restart server:**
    ```bash
    lsof -ti:3014 | xargs kill -9
-   export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+   export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
    node simple_webhook_server.js
    ```
 
@@ -378,7 +378,7 @@ node backend/scripts/dailyReport.js
 
 ### Full Operations Check
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/tradingview_ops.sh
 ```
 
@@ -389,7 +389,7 @@ export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d
 
 ### Verification Suite
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/verify_tradingview_webhook.sh
 ```
 
@@ -402,7 +402,7 @@ pkill -f "ngrok http 3014"
 ### Restart Server
 ```bash
 lsof -ti:3014 | xargs kill -9
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 node simple_webhook_server.js
 ```
 

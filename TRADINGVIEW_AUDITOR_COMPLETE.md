@@ -194,7 +194,7 @@ Warnings: 0
 
 1. Send a test webhook:
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 curl -X POST http://localhost:3014/webhook/tradingview \
   -H "Content-Type: application/json" \
   -H "X-TradingView-Signature: sha256=$(echo -n '{"symbol":"BTCUSDT","action":"BUY","price":50000,"quantity":0.1,"alert_id":"test-1","timestamp":1234567890}' | openssl dgst -sha256 -hmac "$TRADINGVIEW_WEBHOOK_SECRET" | awk '{print $2}')" \

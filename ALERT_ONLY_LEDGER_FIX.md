@@ -111,7 +111,7 @@ curl -s -X POST http://localhost:3001/webhook/tradingview \
     "quantity":0.1,
     "alert_id":"test_xau_alert_only",
     "timestamp":1738230000,
-    "secret":"dev_tradingview_secret_123"
+    "secret":"[DEV_SECRET_PLACEHOLDER]"
   }' | jq .
 
 # Expected API Response:
@@ -148,7 +148,7 @@ curl -s -X POST http://localhost:3001/webhook/tradingview \
     "quantity":0.01,
     "alert_id":"test_btc_killswitch",
     "timestamp":1738230001,
-    "secret":"dev_tradingview_secret_123"
+    "secret":"[DEV_SECRET_PLACEHOLDER]"
   }' | jq .
 
 # Expected API Response:

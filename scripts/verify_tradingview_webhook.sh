@@ -4,7 +4,7 @@
 # 
 # How to run:
 #   cd /Users/davidmikulis/neuro-pilot-ai
-#   export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+#   export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 #   ./scripts/verify_tradingview_webhook.sh
 #
 # Prerequisites:
@@ -25,7 +25,7 @@ NC='\033[0m' # No Color
 # Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
 LOCAL_PORT="${PORT:-${WEBHOOK_PORT:-3014}}"
 LOCAL_URL="http://localhost:${LOCAL_PORT}"
-SECRET="${TRADINGVIEW_WEBHOOK_SECRET:-11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784}"
+SECRET="${TRADINGVIEW_WEBHOOK_SECRET:-[YOUR_TRADINGVIEW_WEBHOOK_SECRET]}"
 PASSED=0
 FAILED=0
 

@@ -20,7 +20,7 @@ This script will:
 
 **Step 1: Set the secret**
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ```
 
 **Step 2: Run tests**
@@ -53,7 +53,7 @@ When tests pass, you'll see:
 🧪 Trading System Test Suite
 ============================
 Base URL: http://localhost:3014
-Secret: 11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+Secret: [YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 
 1️⃣  Health Check
 Testing: Health Check... ✅ PASS (Status: 200)
@@ -148,7 +148,7 @@ cd /Users/davidmikulis/neuro-pilot-ai
 Or manually:
 
 ```bash
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./test_system.sh
 ```
 

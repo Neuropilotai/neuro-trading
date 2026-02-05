@@ -47,7 +47,7 @@
    - Click three dots (⋯) → **Edit**
    - **Condition:** `🎯 Elite AI Long` (BUY) or `🎯 Elite AI Short` (SELL)
    - **Webhook URL:** Your ngrok URL (get with `./scripts/get_public_webhook_url.sh`)
-   - **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+   - **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
    - **Alert Message:** Leave empty or use default (Pine Script will send correct format automatically!)
    - **Frequency:** `Once Per Bar Close`
    - Click **Save**

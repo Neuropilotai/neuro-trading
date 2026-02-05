@@ -24,7 +24,7 @@ Your **Enterprise Secure Inventory System** now has Google Authenticator 2FA ena
 
 ### **Step 1: Enter Credentials**
 - **Email**: `neuro.pilot.ai@gmail.com`
-- **Password**: `EnterpriseSecure2024!`
+- **Password**: `[CHANGE_ME]`
 
 ### **Step 2: Enter 2FA Code**
 1. Open Google Authenticator on your phone
@@ -43,7 +43,7 @@ Your **Enterprise Secure Inventory System** now has Google Authenticator 2FA ena
 ### **Recovery Information** (Keep Safe!)
 - **Manual Entry Key**: `HA3SUQSJGYZWWVCHGR5G4ILEFFETUMJEGJDCC4LLKR4FW3ZJIZ4A`
 - **Account Email**: `neuro.pilot.ai@gmail.com`
-- **Admin Password**: `EnterpriseSecure2024!`
+- **Admin Password**: `[CHANGE_ME]`
 
 ### **If You Lose Access:**
 1. **Lost Phone**: Use the manual entry key to set up on a new device
@@ -83,7 +83,7 @@ curl -X POST http://localhost:8443/api/users \
   -H "Content-Type: application/json" \
   -d '{
     "email": "manager@company.com",
-    "password": "SecurePass2024!",
+    "password": "[CHANGE_ME]",
     "role": "MANAGER",
     "firstName": "John",
     "lastName": "Manager"

@@ -65,7 +65,7 @@ async function testUserManagement() {
     console.log('\n1️⃣  LOGGING IN AS SUPER ADMIN...');
     const loginData = {
       email: 'neuro.pilot.ai@gmail.com',
-      password: 'EnterpriseSecure2024!'
+      password: '[CHANGE_ME]'
     };
 
     const loginResponse = await makeRequest('POST', '/api/auth/login', loginData);
@@ -99,7 +99,7 @@ async function testUserManagement() {
     const newUsers = [
       {
         email: 'admin@company.com',
-        password: 'Admin2024!Secure',
+        password: '[CHANGE_ME]',
         role: 'ADMIN',
         firstName: 'John',
         lastName: 'Admin',
@@ -108,7 +108,7 @@ async function testUserManagement() {
       },
       {
         email: 'manager@company.com',
-        password: 'Manager2024!Safe',
+        password: '[CHANGE_ME]',
         role: 'MANAGER',
         firstName: 'Jane',
         lastName: 'Manager',
@@ -117,7 +117,7 @@ async function testUserManagement() {
       },
       {
         email: 'operator@company.com',
-        password: 'Operator2024!',
+        password: '[CHANGE_ME]',
         role: 'OPERATOR',
         firstName: 'Mike',
         lastName: 'Operator',
@@ -126,7 +126,7 @@ async function testUserManagement() {
       },
       {
         email: 'viewer@company.com',
-        password: 'Viewer2024!',
+        password: '[CHANGE_ME]',
         role: 'VIEWER',
         firstName: 'Sarah',
         lastName: 'Viewer',

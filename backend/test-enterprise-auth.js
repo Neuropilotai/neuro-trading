@@ -4,7 +4,7 @@ const http = require('http');
 async function testLogin() {
   const loginData = JSON.stringify({
     email: 'neuro.pilot.ai@gmail.com',
-    password: 'EnterpriseSecure2024!'
+    password: '[CHANGE_ME]'
   });
 
   const options = {

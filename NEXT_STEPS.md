@@ -66,7 +66,7 @@ You should see:
 curl http://localhost:3014/health | jq '.'
 
 # Run comprehensive verification script (recommended)
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/verify_tradingview_webhook.sh
 
 # OR run legacy test suite
@@ -479,6 +479,6 @@ IBKR_ACCOUNT_ID=All          # Account ID (optional, 'All' for all accounts)
 **To Run Verification:**
 ```bash
 cd /Users/davidmikulis/neuro-pilot-ai
-export TRADINGVIEW_WEBHOOK_SECRET=11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784
+export TRADINGVIEW_WEBHOOK_SECRET=[YOUR_TRADINGVIEW_WEBHOOK_SECRET]
 ./scripts/verify_tradingview_webhook.sh
 ```

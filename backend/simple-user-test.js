@@ -63,7 +63,7 @@ async function testLogin() {
     console.log('1. Attempting login...');
     const loginData = {
       email: 'neuro.pilot.ai@gmail.com',
-      password: 'EnterpriseSecure2024!'
+      password: '[CHANGE_ME]'
     };
 
     const loginResponse = await makeRequest('POST', '/api/auth/login', loginData);
@@ -86,7 +86,7 @@ async function testLogin() {
       console.log('\n2. Testing user creation...');
       const newUser = {
         email: 'test.manager@company.com',
-        password: 'TestManager2024!',
+        password: '[CHANGE_ME]',
         role: 'MANAGER',
         firstName: 'Test',
         lastName: 'Manager',

@@ -33,7 +33,7 @@ You'll get a URL like: `https://abc123.ngrok.io`
 4. **Set Condition:** `🎯 Elite AI Long` (or `🎯 Elite AI Short`)
 5. **Webhook URL:** `https://your-ngrok-url.ngrok.io/webhook/tradingview`
 6. **Alert Message:** (see below)
-7. **Webhook Secret:** `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+7. **Webhook Secret:** `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
 
 ---
 
@@ -67,7 +67,7 @@ You'll get a URL like: `https://abc123.ngrok.io`
 
 3. **In TradingView:**
    - Create alert with webhook URL: `https://abc123.ngrok.io/webhook/tradingview`
-   - Set secret: `11703bfc4ecb43b4307c8a82bcc0f8c01eb5eb3959933d6b7623868850c88784`
+   - Set secret: `[YOUR_TRADINGVIEW_WEBHOOK_SECRET]`
    - Trigger test alert
 
 4. **Check your server:**
