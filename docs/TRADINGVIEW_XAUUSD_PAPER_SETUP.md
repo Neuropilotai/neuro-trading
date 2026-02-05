@@ -71,7 +71,7 @@ Copy the HTTPS URL (e.g., `https://abc123.ngrok-free.app`).
   "timestamp": {{time}},
   "stop_loss": {{strategy.order.stop_loss}},
   "take_profit": {{strategy.order.take_profit}},
-  "secret": "your-secret-here"
+  "webhook_secret": "your-secret-here"
 }
 ```
 
@@ -123,7 +123,7 @@ curl -X POST http://localhost:3014/webhook/tradingview \
     "timestamp": '$(date +%s)',
     "stop_loss": 2640.00,
     "take_profit": 2660.00,
-    "secret": "your-secret-here"
+    "webhook_secret": "your-secret-here"
   }'
 
 # Check status
@@ -222,7 +222,7 @@ Duplicate alerts (same `alert_id`) return 200 OK with `status: "duplicate"` (so 
 
 **Fix:**
 1. Verify `.env` has correct `TRADINGVIEW_WEBHOOK_SECRET`
-2. Verify TradingView alert message includes `"secret": "your-secret"`
+2. Verify TradingView alert message includes `"webhook_secret": "your-secret"`
 3. Or use HMAC signature header instead
 
 ### Issue: "Symbol not allowed"

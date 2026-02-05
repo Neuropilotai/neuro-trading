@@ -57,10 +57,11 @@ function verifySignature(payload, signature, secret) {
  * Webhook authentication middleware
  * Supports two authentication methods:
  * 1. HMAC signature header (X-TradingView-Signature)
- * 2. Body secret (JSON field "secret" matching TRADINGVIEW_WEBHOOK_SECRET)
+ * 2. Body secret (JSON field "webhook_secret" or "secret" matching TRADINGVIEW_WEBHOOK_SECRET)
  * 
  * Priority: Header auth is checked first, then body secret auth
  * Checks HMAC signature if ENABLE_WEBHOOK_AUTH is true
+ * Note: "webhook_secret" is preferred, "secret" is accepted for backward compatibility
  */
 async function webhookAuth(req, res, next) {
   // Check if auth is enabled (default: true)
@@ -146,9 +147,12 @@ async function webhookAuth(req, res, next) {
 
   // Method 2: Check body secret (fallback if no header)
   // Note: req.body is available because express.json() runs before this middleware
-  if (req.body && typeof req.body === 'object' && req.body.secret) {
-    const bodySecret = req.body.secret;
-    
+  // Accept both "webhook_secret" (preferred) and "secret" (backward compatibility)
+  const bodySecret = req.body && typeof req.body === 'object' 
+    ? (req.body.webhook_secret || req.body.secret)
+    : null;
+  
+  if (bodySecret) {
     // Use timing-safe comparison for secret
     try {
       const isValid = crypto.timingSafeEqual(
@@ -159,7 +163,8 @@ async function webhookAuth(req, res, next) {
       if (isValid) {
         // Body secret valid, proceed
         console.log('✅ Webhook authenticated via body secret');
-        // Remove secret from body to prevent it from being logged/stored
+        // Remove both secret fields from body to prevent them from being logged/stored
+        delete req.body.webhook_secret;
         delete req.body.secret;
         // Record auth mode for telemetry
         req.authModeUsed = 'body_secret';
@@ -214,7 +219,7 @@ async function webhookAuth(req, res, next) {
   
   return res.status(401).json({
     error: 'Unauthorized',
-    message: 'Missing authentication: Provide either X-TradingView-Signature header or "secret" field in request body'
+    message: 'Missing authentication: Provide either X-TradingView-Signature header or "webhook_secret" (or "secret") field in request body'
   });
 }
 

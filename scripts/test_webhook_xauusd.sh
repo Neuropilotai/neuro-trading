@@ -34,7 +34,7 @@ BUY_PAYLOAD=$(cat <<EOF
   "timestamp": ${TIMESTAMP},
   "stop_loss": 2640.00,
   "take_profit": 2660.00,
-  "secret": "${WEBHOOK_SECRET}"
+  "webhook_secret": "${WEBHOOK_SECRET}"
 }
 EOF
 )
@@ -72,7 +72,7 @@ SELL_PAYLOAD=$(cat <<EOF
   "quantity": 0.01,
   "alert_id": "test_sell_${TIMESTAMP}",
   "timestamp": $(date +%s),
-  "secret": "${WEBHOOK_SECRET}"
+  "webhook_secret": "${WEBHOOK_SECRET}"
 }
 EOF
 )

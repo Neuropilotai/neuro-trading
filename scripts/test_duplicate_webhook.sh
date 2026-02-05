@@ -31,7 +31,7 @@ PAYLOAD=$(cat <<EOF
   "alert_id": "${ALERT_ID}",
   "timestamp": ${TIMESTAMP},
   "stop_loss": 2640.00,
-  "secret": "${WEBHOOK_SECRET}"
+  "webhook_secret": "${WEBHOOK_SECRET}"
 }
 EOF
 )
