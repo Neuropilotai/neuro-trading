@@ -15,6 +15,10 @@
 // Load environment variables first
 require('dotenv').config();
 
+// Validate environment variables (fail fast)
+const envValidator = require('./backend/services/envValidator');
+envValidator.validateAndFailFast();
+
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
@@ -23,6 +27,7 @@ const rateLimit = require('express-rate-limit');
 // Import middleware and services
 const { webhookAuth } = require('./backend/middleware/webhookAuth');
 const { webhookValidation } = require('./backend/middleware/webhookValidation');
+const { cooldownGuardMiddleware } = require('./backend/middleware/cooldownGuard');
 const { riskCheck } = require('./backend/middleware/riskCheck');
 const deduplicationService = require('./backend/services/deduplicationService');
 const riskEngine = require('./backend/services/riskEngine');
@@ -39,6 +44,16 @@ const automatedScalpingTrader = require('./backend/services/automatedScalpingTra
 const tradingViewSync = require('./backend/services/tradingViewSync');
 const { getBrokerAdapter } = require('./backend/adapters/brokerAdapterFactory');
 const tradingViewTelemetry = require('./backend/services/tradingViewTelemetry');
+
+// ===== Boot guard: prevent double initialization =====
+global.__NP_TRADING_BOOTED ??= false;
+global.__NP_TRADING_BOOT_RAN ??= false;
+
+if (global.__NP_TRADING_BOOTED) {
+  console.warn("⚠️  Boot guard: initialization already ran. Skipping duplicate boot.");
+} else {
+  global.__NP_TRADING_BOOTED = true;
+}
 
 const app = express();
 // Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
@@ -82,11 +97,12 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Main webhook endpoint for TradingView
-app.post('/webhook/tradingview',
+// Factorized webhook pipeline (reusable for both endpoints)
+const webhookPipeline = [
   limiter,                    // Rate limiting
   webhookAuth,                // HMAC signature verification
   webhookValidation,          // Payload validation
+  cooldownGuardMiddleware,    // Cooldown guard (per symbol+action)
   async (req, res, next) => { // Deduplication check
     try {
       const dedupeResult = await deduplicationService.checkDuplicate(req.body);
@@ -98,21 +114,22 @@ app.post('/webhook/tradingview',
             remoteIp: req.ip || req.connection?.remoteAddress,
             userAgent: req.get('user-agent'),
             authModeUsed: req.authModeUsed || 'unknown',
-            result: '409',
-            httpStatus: 409,
+            result: '200',
+            httpStatus: 200,
             alertId: req.body.alert_id,
             symbol: req.body.symbol,
             action: req.body.action,
             idempotencyOutcome: 'duplicate'
           });
         } catch (telemetryError) {
-          // Log but don't block response if telemetry fails
           console.warn('⚠️  Failed to record duplicate telemetry:', telemetryError.message);
         }
-        
-        return res.status(409).json({
-          error: 'Duplicate alert',
-          message: `Alert with idempotency key ${dedupeResult.idempotencyKey} already processed`,
+
+        // IMPORTANT: return 200 so TradingView won't retry
+        return res.status(200).json({
+          ok: true,
+          status: 'duplicate',
+          message: `Duplicate alert ignored (idempotency key ${dedupeResult.idempotencyKey})`,
           idempotencyKey: dedupeResult.idempotencyKey
         });
       }
@@ -120,14 +137,17 @@ app.post('/webhook/tradingview',
       // Attach idempotency key to request
       req.idempotencyKey = dedupeResult.idempotencyKey;
       req.idempotencyOutcome = 'new';
-      next();
+      return next();
     } catch (error) {
       console.error('❌ Deduplication error:', error);
       return res.status(500).json({ error: 'Internal server error', message: error.message });
     }
   },
-  riskCheck,                  // Risk management
-  async (req, res) => {
+  riskCheck                  // Risk management
+];
+
+// Main webhook handler (reusable for both endpoints)
+async function tradingViewMainHandler(req, res) {
     try {
         // CRITICAL GUARD: If riskCheck returned 403/500, req.orderIntent won't be set
         // This handler should only run if riskCheck passed (called next())
@@ -343,11 +363,49 @@ app.post('/webhook/tradingview',
                         executionResult = await brokerAdapter.placeOrder(orderIntent);
                         console.log(`✅ Trade executed via ${brokerAdapter.getName()} broker: ${executionResult.tradeId}`);
                         
+                        // Record cooldown guard execution (after successful trade)
+                        if (req.cooldownGuard) {
+                            req.cooldownGuard.recordExecution(orderIntent.symbol, orderIntent.action);
+                        }
+                        
                         // Update trade status to EXECUTED/FILLED in ledger
                         if (executionResult.executionResult) {
                             tradeData.status = 'FILLED';
                             tradeData.pnl = executionResult.executionResult.pnl || 0;
                             tradeData.executed_at = executionResult.executionResult.executedAt;
+                            
+                            // Check if this is a trade close (SELL closes BUY, etc.)
+                            // For v1: simple single-position model - SELL closes BUY position
+                            const isTradeClose = (orderIntent.action === 'SELL' || orderIntent.action === 'CLOSE');
+                            
+                            // Pattern attribution on trade close (guard against double-counting)
+                            if (isTradeClose && tradeData.pnl !== undefined && tradeData.pnl !== null) {
+                                try {
+                                    const patternAttributionService = require('./backend/services/patternAttributionService');
+                                    
+                                    // Get patterns from alert metadata or pattern recognition
+                                    const patterns = alertData.patterns || [];
+                                    
+                                    // Calculate PnL percentage (if account balance available)
+                                    const accountBalance = parseFloat(process.env.ACCOUNT_BALANCE || '100000');
+                                    const pnlPct = accountBalance > 0 ? (tradeData.pnl / accountBalance) * 100 : 0;
+                                    
+                                    // Attribute trade to patterns (idempotent - checks for existing attribution)
+                                    await patternAttributionService.attributeTrade(
+                                        tradeId,
+                                        patterns,
+                                        {
+                                            pnl: tradeData.pnl,
+                                            pnlPct: pnlPct
+                                        }
+                                    );
+                                    
+                                    console.log(`📊 Pattern attribution completed for trade ${tradeId}`);
+                                } catch (attributionError) {
+                                    console.error('❌ Pattern attribution error:', attributionError.message);
+                                    // Continue - attribution failure shouldn't break trade execution
+                                }
+                            }
                             
                             // Learn from trade outcome (pattern recognition + learning agents)
                             try {
@@ -502,7 +560,13 @@ app.post('/webhook/tradingview',
             message: error.message 
         });
     }
-});
+}
+
+// Main webhook endpoint for TradingView (legacy path)
+app.post('/webhook/tradingview', ...webhookPipeline, tradingViewMainHandler);
+
+// API webhook endpoint for TradingView (recommended path)
+app.post('/api/webhook/tradingview', ...webhookPipeline, tradingViewMainHandler);
 
 // Test GET endpoint to verify server is working
 app.get('/webhook/tradingview', (req, res) => {
@@ -512,6 +576,89 @@ app.get('/webhook/tradingview', (req, res) => {
         method: 'Use POST requests to send alerts',
         url: `http://localhost:${port}/webhook/tradingview`
     });
+});
+
+// Trading status endpoint
+app.get('/api/status/trading', async (req, res) => {
+  try {
+    const tradingMode = process.env.TRADING_MODE || 'paper';
+    const tradingEnabled = process.env.TRADING_ENABLED !== 'false';
+    const riskEnabled = process.env.ENABLE_RISK_ENGINE !== 'false';
+    
+    // Get broker adapter status
+    let oandaConfigured = false;
+    let brokerHealth = null;
+    try {
+      const brokerAdapter = getBrokerAdapter();
+      brokerHealth = await brokerAdapter.healthCheck();
+      oandaConfigured = brokerAdapter.getName() === 'OANDA' && brokerAdapter.isEnabled();
+    } catch (error) {
+      // Broker not available
+    }
+    
+    // Get last webhook timestamp from telemetry
+    let lastWebhookTimestamp = null;
+    try {
+      await tradingViewTelemetry.initialize();
+      const lastTelemetry = tradingViewTelemetry.getLastTelemetry();
+      if (lastTelemetry) {
+        lastWebhookTimestamp = lastTelemetry.receivedAt;
+      }
+    } catch (error) {
+      // Telemetry not available
+    }
+    
+    // Get open positions count
+    let openPositionsCount = 0;
+    try {
+      const brokerAdapter = getBrokerAdapter();
+      const positions = await brokerAdapter.getPositions();
+      openPositionsCount = positions ? positions.length : 0;
+    } catch (error) {
+      // Positions not available
+    }
+    
+    // Get ledger path
+    const ledgerPath = process.env.LEDGER_DB_PATH || './data/trade_ledger.db';
+    
+    // Get last error (if any) - could be from risk engine or broker
+    let lastError = null;
+    if (brokerHealth && !brokerHealth.connected && brokerHealth.error) {
+      lastError = brokerHealth.error;
+    }
+    
+    // Get cooldown guard stats
+    const { cooldownGuard } = require('./backend/middleware/cooldownGuard');
+    const cooldownStats = cooldownGuard.getStats();
+    
+    res.json({
+      ok: true,
+      mode: tradingMode,
+      trading_enabled: tradingEnabled,
+      risk_enabled: riskEnabled,
+      oanda_configured: oandaConfigured,
+      last_webhook_timestamp: lastWebhookTimestamp,
+      open_positions_count: openPositionsCount,
+      ledger_path: ledgerPath,
+      last_error: lastError,
+      cooldown: {
+        enabled: cooldownStats.enabled,
+        seconds: cooldownStats.cooldownSeconds,
+        active_cooldowns: cooldownStats.activeCooldowns
+      },
+      broker: brokerHealth ? {
+        name: brokerHealth.broker || 'unknown',
+        connected: brokerHealth.connected || false,
+        enabled: brokerHealth.enabled !== false
+      } : null
+    });
+  } catch (error) {
+    console.error('❌ Error getting trading status:', error);
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
+  }
 });
 
 // Health check
@@ -1704,8 +1851,14 @@ app.get('/', (req, res) => {
 
 // Start server
 app.listen(port, async () => {
-    // Fast-fail check for Google Drive if enabled
-    if (process.env.ENABLE_GOOGLE_DRIVE_SYNC === 'true') {
+    // ===== Boot guard: prevent double initialization =====
+    if (global.__NP_TRADING_BOOTED && !global.__NP_TRADING_BOOT_RAN) {
+        global.__NP_TRADING_BOOT_RAN = true;
+
+        // Initialize services (idempotent guards in each service prevent double init)
+
+        // Fast-fail check for Google Drive if enabled
+        if (process.env.ENABLE_GOOGLE_DRIVE_SYNC === 'true') {
         const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
         try {
             // If enabled but not initialized, try to initialize
@@ -1806,6 +1959,7 @@ app.listen(port, async () => {
     } catch (error) {
         console.warn(`⚠️  Pattern loading failed: ${error.message}`);
     }
+    } // End of boot guard wrapper
 });
 
 // Handle graceful shutdown

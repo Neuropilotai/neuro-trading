@@ -6,10 +6,23 @@ PORT=3014
 WEBHOOK_PORT=3014
 
 # ===== Webhook Security =====
+TRADINGVIEW_WEBHOOK_SECRET=your-webhook-secret-here
 WEBHOOK_SECRET=your-webhook-secret-here
 ENABLE_WEBHOOK_AUTH=true
 ENABLE_WEBHOOK_VALIDATION=true
 ENABLE_WEBHOOK_DEDUPE=true
+
+# ===== Trading Mode Configuration =====
+TRADING_MODE=paper
+# Options: paper, live
+# paper: Simulated trading only
+# live: Real trading (requires TRADING_LIVE_CONFIRM=true)
+
+TRADING_ENABLED=true
+# Master kill switch: if false, all trades rejected
+
+TRADING_LIVE_CONFIRM=false
+# Required for TRADING_MODE=live to prevent accidental live trading
 
 # ===== Pattern Recognition =====
 ENABLE_PATTERN_RECOGNITION=true
@@ -17,26 +30,57 @@ ENABLE_PATTERN_FILTERING=true
 PATTERN_MIN_WIN_RATE=0.50
 PATTERN_MIN_PROFIT_FACTOR=1.0
 PATTERN_MIN_SAMPLE_SIZE=10
+PATTERN_MIN_TRADES=10
 
 # ===== Risk Management =====
 ENABLE_RISK_ENGINE=true
-TRADING_ENABLED=true
 MAX_DAILY_LOSS_PERCENT=2.0
 MAX_POSITION_SIZE_PERCENT=25.0
 MAX_OPEN_POSITIONS=5
 REQUIRE_STOP_LOSS=true
 REQUIRE_TAKE_PROFIT=false
+MAX_STOP_LOSS_WIDTH_PCT=10
+# Maximum stop loss width as percentage of entry price
+
+# ===== Cooldown Protection =====
+COOLDOWN_SECONDS=180
+# Cooldown period per symbol+action to prevent spam (default: 3 minutes)
 
 # ===== Account =====
 ACCOUNT_BALANCE=100000
+DEFAULT_POSITION_SIZE=0.01
+# Default position size for XAUUSD (in lots/units)
 
 # ===== Trade Ledger =====
 ENABLE_TRADE_LEDGER=true
 LEDGER_DB_PATH=./data/trade_ledger.db
 
 # ===== Broker Configuration =====
-BROKER_TYPE=paper
+BROKER=paper
 # Options: paper, oanda, ibkr
+
+# ===== OANDA Configuration =====
+OANDA_ENV=practice
+# Options: practice, live
+# practice: OANDA practice/demo account
+# live: OANDA live account
+
+OANDA_API_TOKEN=your-oanda-api-token-here
+OANDA_ACCOUNT_ID=your-oanda-account-id-here
+OANDA_BASE_URL=
+# Optional: Override base URL (defaults based on OANDA_ENV)
+
+OANDA_PRACTICE_EXECUTION=false
+# If true and TRADING_MODE=paper, also send orders to OANDA practice API
+# (still treats internal state as paper trading)
+
+# ===== Symbol Configuration =====
+DEFAULT_SYMBOL=XAUUSD
+# Default trading symbol
+
+ALLOWED_SYMBOLS=XAUUSD
+# Comma-separated list of allowed symbols (e.g., "XAUUSD,GBPUSD,EURUSD")
+# If empty, all symbols allowed (not recommended for production)
 
 # ===== Automated Trading =====
 ENABLE_AUTOTRADER=true

@@ -15,6 +15,7 @@ class IndicatorGenerator {
     this.patternToIndicatorMap = new Map(); // patternSignature -> [indicatorIds]
     this.tradingStyle = process.env.TRADING_STYLE || 'scalping'; // scalping, swing, position
     this.enabled = process.env.ENABLE_INDICATOR_GENERATION !== 'false';
+    this.__initialized = false; // Idempotent initialization guard
     
     this.stats = {
       indicatorsGenerated: 0,
@@ -29,6 +30,14 @@ class IndicatorGenerator {
    */
   async initialize() {
     if (!this.enabled) return;
+    
+    // Idempotent guard: prevent double initialization
+    if (this.__initialized) {
+      console.log('⚠️  Indicator generator already initialized (idempotent guard)');
+      return;
+    }
+    
+    this.__initialized = true;
     
     try {
       // Load patterns to analyze

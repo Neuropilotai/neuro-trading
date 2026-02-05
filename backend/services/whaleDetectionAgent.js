@@ -19,6 +19,7 @@ class WhaleDetectionAgent extends EventEmitter {
     super();
     this.enabled = process.env.ENABLE_WHALE_DETECTION !== 'false';
     this.isRunning = false;
+    this.__initialized = false; // Idempotent initialization guard
     
     // Configuration
     this.config = {
@@ -63,6 +64,13 @@ class WhaleDetectionAgent extends EventEmitter {
       return;
     }
 
+    // Idempotent guard: prevent double initialization
+    if (this.__initialized) {
+      console.log('⚠️  Whale detection agent already initialized (idempotent guard)');
+      return;
+    }
+
+    this.__initialized = true;
     this.isRunning = true;
     console.log('🐋 Whale detection agent initialized');
     console.log(`   Volume spike threshold: ${this.config.volumeSpikeThreshold}x`);

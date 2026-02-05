@@ -47,6 +47,7 @@ class PatternRecognitionService {
     
     // Lazy-load patterns only when detectPatterns() is called (not during module import)
     this._patternsLoaded = false;
+    this.__patternsLoaded = false; // Idempotent initialization guard for loadPatterns()
   }
 
   /**
@@ -604,6 +605,12 @@ class PatternRecognitionService {
    * Load patterns from storage (Google Drive primary, local cache backup)
    */
   async loadPatterns() {
+    // Idempotent guard: prevent double loading during boot
+    if (this.__patternsLoaded && this.patterns.size > 0) {
+      console.log('⚠️  Patterns already loaded (idempotent guard)');
+      return;
+    }
+    
     try {
       const googleDriveStorage = require('./googleDrivePatternStorage');
       let patternsData = null;
@@ -658,9 +665,15 @@ class PatternRecognitionService {
         }
 
         console.log(`✅ Loaded ${this.patterns.size} patterns from ${loadedFrom}`);
+        this.__patternsLoaded = true;
+      } else {
+        // Even if no patterns found, mark as loaded to prevent retries
+        this.__patternsLoaded = true;
       }
     } catch (error) {
       console.log('📊 Starting with empty pattern bank');
+      // Mark as loaded even on error to prevent infinite retries
+      this.__patternsLoaded = true;
     }
   }
 

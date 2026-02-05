@@ -64,11 +64,43 @@ function validateAlertPayload(payload) {
     errors.push(`Invalid alert_id: ${payload.alert_id}. Must be a string`);
   }
 
-  // Validate timestamp (if provided, must be valid)
+  // Validate timestamp (if provided, must be valid and within reasonable bounds)
   if (payload.timestamp !== undefined) {
     const timestamp = parseInt(payload.timestamp);
     if (isNaN(timestamp) || timestamp <= 0) {
       errors.push(`Invalid timestamp: ${payload.timestamp}. Must be a positive integer`);
+    } else {
+      // Timestamp sanity check: not too old (24 hours) or too future (5 minutes)
+      const now = Date.now();
+      const timestampMs = timestamp * 1000; // Assume seconds, convert to ms
+      const ageMs = now - timestampMs;
+      const futureMs = timestampMs - now;
+      
+      // Allow timestamps in seconds or milliseconds
+      const timestampMsAdjusted = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+      const ageMsAdjusted = now - timestampMsAdjusted;
+      const futureMsAdjusted = timestampMsAdjusted - now;
+      
+      const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
+      const maxFutureMs = 5 * 60 * 1000; // 5 minutes
+      
+      if (ageMsAdjusted > maxAgeMs) {
+        errors.push(`Timestamp too old: ${Math.floor(ageMsAdjusted / 1000 / 60)} minutes ago (max: 24 hours)`);
+      } else if (futureMsAdjusted > maxFutureMs) {
+        errors.push(`Timestamp too far in future: ${Math.floor(futureMsAdjusted / 1000 / 60)} minutes (max: 5 minutes)`);
+      }
+    }
+  }
+
+  // Validate symbol allowlist (if configured)
+  if (payload.symbol !== undefined) {
+    const allowedSymbols = process.env.ALLOWED_SYMBOLS;
+    if (allowedSymbols && allowedSymbols.trim() !== '') {
+      const symbolList = allowedSymbols.split(',').map(s => s.trim().toUpperCase());
+      const symbolUpper = String(payload.symbol).toUpperCase();
+      if (!symbolList.includes(symbolUpper)) {
+        errors.push(`Symbol not allowed: ${payload.symbol}. Allowed symbols: ${symbolList.join(', ')}`);
+      }
     }
   }
 

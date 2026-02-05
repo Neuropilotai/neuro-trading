@@ -18,6 +18,7 @@ class AutomatedScalpingTrader extends EventEmitter {
     this.enabled = process.env.ENABLE_AUTOMATED_TRADING !== 'false';
     this.isRunning = false;
     this.intervalId = null;
+    this.__started = false; // Idempotent initialization guard
     
     // Trading configuration
     this.config = {
@@ -68,10 +69,18 @@ class AutomatedScalpingTrader extends EventEmitter {
       return;
     }
 
+    // Idempotent guard: prevent double initialization
+    if (this.__started) {
+      console.log('⚠️  Automated trading already started (idempotent guard)');
+      return;
+    }
+
     if (this.isRunning) {
       console.log('⚠️  Automated trading is already running');
       return;
     }
+
+    this.__started = true;
 
     // Ensure indicators are loaded
     if (indicatorGenerator.enabled) {

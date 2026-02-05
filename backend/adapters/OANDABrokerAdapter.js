@@ -19,12 +19,14 @@ class OANDABrokerAdapter extends BrokerAdapter {
     this.name = 'OANDA';
     this.enabled = (process.env.BROKER || 'paper') === 'oanda';
     this.connected = false;
-    this.apiKey = process.env.OANDA_API_KEY;
+    // Support both OANDA_API_KEY and OANDA_API_TOKEN
+    this.apiKey = process.env.OANDA_API_KEY || process.env.OANDA_API_TOKEN;
     this.accountId = process.env.OANDA_ACCOUNT_ID;
-    this.environment = process.env.OANDA_ENVIRONMENT || 'practice';
-    this.baseUrl = this.environment === 'live' 
+    this.environment = process.env.OANDA_ENV || process.env.OANDA_ENVIRONMENT || 'practice';
+    this.baseUrl = process.env.OANDA_BASE_URL || (this.environment === 'live' 
       ? 'https://api-fxtrade.oanda.com'
-      : 'https://api-fxpractice.oanda.com';
+      : 'https://api-fxpractice.oanda.com');
+    this.practiceExecution = process.env.OANDA_PRACTICE_EXECUTION === 'true';
   }
 
   /**
@@ -89,6 +91,7 @@ class OANDABrokerAdapter extends BrokerAdapter {
 
   /**
    * Place an order via OANDA API
+   * Supports XAUUSD and other OANDA instruments
    * Uses MARKET order for simplicity
    */
   async placeOrder(orderIntent) {
@@ -102,6 +105,12 @@ class OANDABrokerAdapter extends BrokerAdapter {
       throw new Error('Missing required fields: symbol, action, quantity');
     }
 
+    // Normalize symbol (remove exchange prefix if present, e.g., "OANDA:XAUUSD" -> "XAUUSD")
+    const normalizedSymbol = symbol.includes(':') ? symbol.split(':')[1] : symbol;
+    
+    // For XAUUSD, OANDA uses "XAU_USD" format
+    const oandaSymbol = normalizedSymbol === 'XAUUSD' ? 'XAU_USD' : normalizedSymbol;
+
     const units = action === 'BUY'
       ? Math.abs(quantity)
       : action === 'SELL' || action === 'CLOSE'
@@ -111,7 +120,7 @@ class OANDABrokerAdapter extends BrokerAdapter {
     const orderBody = {
       order: {
         units: units.toString(),
-        instrument: symbol,
+        instrument: oandaSymbol,
         type: price ? 'LIMIT' : 'MARKET',
         positionFill: 'DEFAULT',
       }
@@ -129,29 +138,51 @@ class OANDABrokerAdapter extends BrokerAdapter {
       orderBody.order.stopLossOnFill = { price: stopLoss.toString() };
     }
 
-    const data = await this.request(
-      'POST',
-      `/v3/accounts/${this.accountId}/orders`,
-      orderBody
-    );
+    try {
+      const data = await this.request(
+        'POST',
+        `/v3/accounts/${this.accountId}/orders`,
+        orderBody
+      );
 
-    const fill = data.orderFillTransaction || data.orderCreateTransaction || {};
-    const executedAt = fill.time || new Date().toISOString();
-    const fillPrice = fill.price ? parseFloat(fill.price) : price || null;
-    const filledQuantity = fill.units ? Math.abs(parseFloat(fill.units)) : Math.abs(quantity);
+      const fill = data.orderFillTransaction || data.orderCreateTransaction || {};
+      const executedAt = fill.time || new Date().toISOString();
+      const fillPrice = fill.price ? parseFloat(fill.price) : price || null;
+      const filledQuantity = fill.units ? Math.abs(parseFloat(fill.units)) : Math.abs(quantity);
 
-    return {
-      success: true,
-      tradeId: fill.id || fill.orderID || `OANDA_${Date.now()}`,
-      executionResult: {
-        action,
-        symbol,
-        filledQuantity,
-        fillPrice,
-        pnl: 0,
-        executedAt
+      return {
+        success: true,
+        tradeId: fill.id || fill.orderID || `OANDA_${Date.now()}`,
+        executionResult: {
+          action,
+          symbol: normalizedSymbol, // Return normalized symbol
+          filledQuantity,
+          fillPrice,
+          pnl: 0,
+          executedAt
+        }
+      };
+    } catch (error) {
+      // If practice execution is enabled and we're in paper mode, log but don't fail
+      const tradingMode = process.env.TRADING_MODE || 'paper';
+      if (tradingMode === 'paper' && this.practiceExecution) {
+        console.warn(`⚠️  OANDA practice execution failed (continuing with paper): ${error.message}`);
+        // Return paper execution result
+        return {
+          success: true,
+          tradeId: `PAPER_${Date.now()}`,
+          executionResult: {
+            action,
+            symbol: normalizedSymbol,
+            filledQuantity: quantity,
+            fillPrice: price || null,
+            pnl: 0,
+            executedAt: new Date().toISOString()
+          }
+        };
       }
-    };
+      throw error;
+    }
   }
 
   /**
@@ -188,8 +219,10 @@ class OANDABrokerAdapter extends BrokerAdapter {
       const shortUnits = parseFloat(pos.short.units || 0);
       const netUnits = longUnits - shortUnits;
       const avgPrice = pos.long.averagePrice || pos.short.averagePrice || null;
+      // Normalize symbol (XAU_USD -> XAUUSD)
+      const normalizedSymbol = pos.instrument === 'XAU_USD' ? 'XAUUSD' : pos.instrument;
       return {
-        symbol: pos.instrument,
+        symbol: normalizedSymbol,
         quantity: netUnits,
         avgPrice: avgPrice ? parseFloat(avgPrice) : null,
         currentPrice: avgPrice ? parseFloat(avgPrice) : null,

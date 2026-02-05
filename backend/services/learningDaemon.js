@@ -29,6 +29,8 @@ class LearningDaemon {
     this.pidFile = path.join(__dirname, '../../data/pids/learning.pid');
     this.heartbeatPath = path.join(__dirname, '../../data/learning/heartbeat.json');
     this.startedAt = new Date().toISOString();
+    this.__initialized = false; // Idempotent initialization guard
+    this.__started = false; // Idempotent start guard
   }
 
   /**
@@ -39,6 +41,14 @@ class LearningDaemon {
       console.log('⚠️  Learning daemon is DISABLED');
       return;
     }
+
+    // Idempotent guard: prevent double initialization
+    if (this.__initialized) {
+      console.log('⚠️  Learning daemon already initialized (idempotent guard)');
+      return;
+    }
+
+    this.__initialized = true;
 
     try {
       // Ensure log directory exists
@@ -81,11 +91,18 @@ class LearningDaemon {
       return;
     }
 
+    // Idempotent guard: prevent double start
+    if (this.__started) {
+      console.log('⚠️  Learning daemon already started (idempotent guard)');
+      return;
+    }
+
     if (this.isRunning) {
       console.log('⚠️  Learning daemon is already running');
       return;
     }
 
+    this.__started = true;
     this.isRunning = true;
     this.log('INFO', 'Learning daemon started');
     
