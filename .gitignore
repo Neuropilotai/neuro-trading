@@ -147,3 +147,8 @@ TradingDrive/
 .env.*
 !.env.example
 !TRADING_ENV.example
+
+# Public template: exclude real trading engine code
+backend/
+*.key
+*.pem
