@@ -9,7 +9,7 @@ This repository is a PUBLIC template / demo. It must NEVER contain the real trad
 - Real broker execution wiring (OANDA/IBKR live execution paths)
 - Secrets/tokens/keys/private URLs/HMAC material
 - Internal file paths, ledger locations, database files
-- Tuned “learning” parameters that replicate real behavior
+- Tuned "learning" parameters that replicate real behavior
 - Any code that can auto-trade end-to-end
 
 ## Allowed (safe)
@@ -21,5 +21,5 @@ This repository is a PUBLIC template / demo. It must NEVER contain the real trad
 - Screenshots with sensitive info blurred
 
 ## Before every push
-- Search for: secret, api_key, token, password, webhookt
+- Search for: secret, api_key, token, password, webhook_secret
 - Ensure examples use placeholders only
