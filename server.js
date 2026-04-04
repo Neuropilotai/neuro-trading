@@ -1726,7 +1726,7 @@ app.get('/learn/metrics/latest', async (req, res) => {
 
 // Serve dashboard HTML
 app.get('/trading_dashboard.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'trading_dashboard.html'));
+    res.sendFile(path.join(__dirname, 'ops-dashboard', 'trading_dashboard.html'));
 });
 
 // Serve trading system monitor
