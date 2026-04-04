@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NeuroPilot Ops Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-row">
+      <div>
+        <h1>NeuroPilot — Evolution Ops</h1>
+        <div id="generatedAt">Loading...</div>
+        <div id="lastRefresh">Last refresh: —</div>
+      </div>
+      <div class="header-actions">
+        <a href="owner-dashboard.html" class="header-owner-ops-link">Owner Ops view</a>
+        <button id="refreshBtn">Refresh now</button>
+      </div>
+    </div>
+
+    <div id="healthBanner" class="health-banner" aria-label="Global health">
+      <div class="health-item">
+        <span class="health-k">Pipeline</span>
+        <span id="healthPipeline" class="health-v">—</span>
+      </div>
+      <div class="health-item">
+        <span class="health-k">Snapshot age</span>
+        <span id="healthSnapshotAge" class="health-v">—</span>
+      </div>
+      <div class="health-item">
+        <span class="health-k">HTTP</span>
+        <span id="healthHttp" class="health-v health-neutral">—</span>
+      </div>
+      <div class="health-item">
+        <span class="health-k">Data freshness</span>
+        <span id="healthData" class="health-v health-neutral">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section class="card">
+      <h2>Latest Run</h2>
+      <div id="latest"></div>
+    </section>
+
+    <section class="card">
+      <h2>Dataset freshness</h2>
+      <p class="sparkline-hint">From <code>datasets_freshness.json</code> (manifest last candle vs now). Distinct from evolution run timestamps above.</p>
+      <div id="datasetFreshness">—</div>
+    </section>
+
+    <section class="card">
+      <h2>Lagging Pressure</h2>
+      <p class="sparkline-hint">Read-only projection from <code>datasets_freshness.json</code> and <code>owner_transition_alerts.json</code> — no freshness logic in the browser.</p>
+      <div id="laggingPressure"></div>
+    </section>
+
+    <section class="card system-score-card">
+      <h2>System Score</h2>
+      <div id="systemScore" class="system-score-main">—</div>
+      <div id="systemScoreLabel" class="system-score-label muted">—</div>
+      <ul id="systemScoreBreakdown" class="system-score-breakdown"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Delta Sparkline</h2>
+      <p class="sparkline-hint">From <code>trend.json</code> deltas (newest right)</p>
+      <pre id="deltaSparkline" class="sparkline">—</pre>
+      <div id="deltaSparklineMeta" class="sparkline-meta"></div>
+    </section>
+
+    <section class="card">
+      <h2>Trend (last runs)</h2>
+      <pre id="trend"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Alerts</h2>
+      <div id="alerts"></div>
+    </section>
+
+    <section class="card">
+      <h2>Milestones</h2>
+      <div id="milestones"></div>
+    </section>
+
+    <section class="card">
+      <h2>Strategy validation</h2>
+      <p class="sparkline-hint">Automatic anti-bias scoring from <code>strategy_validation.json</code>.</p>
+      <div id="strategyValidation">—</div>
+    </section>
+
+    <section class="card">
+      <h2>Execution status</h2>
+      <p class="sparkline-hint">Isolated broker layer — from <code>execution_status.json</code> (no secrets).</p>
+      <div id="executionStatus">—</div>
+    </section>
+
+    <section class="card">
+      <h2>Status</h2>
+      <div id="statusBox">Initializing…</div>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
