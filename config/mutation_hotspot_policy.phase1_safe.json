@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "description": "Phase 1 safe — 3 règles audit min-trades ; sans pattern_001_open_cf4dce. Activer avec NEUROPILOT_MUTATION_HOTSPOT_POLICY=1",
+  "rules": [
+    {
+      "note": "Audit champion: 16 rejects, 15 far; parameter_jitter + forced_family_shift",
+      "match": { "equals": "mut_2c9c6f_close_f17d88" },
+      "profilePatch": {
+        "jitterScaleMultiply": 0.65,
+        "jitterScaleMin": 0.75,
+        "forcedFamilyShiftWeight": 0,
+        "modeTag": "mut_2c9c6f"
+      }
+    },
+    {
+      "note": "Audit champion: 9/9 far, session_flip dominant",
+      "match": { "prefix": "pattern_010_close_" },
+      "profilePatch": {
+        "sessionFlipWeight": 0,
+        "modeTag": "no_session_flip_p010"
+      }
+    },
+    {
+      "note": "Audit champion: pattern_009 close lineage mostly far",
+      "match": { "prefix": "pattern_009_close_" },
+      "profilePatch": {
+        "sessionFlipWeight": 0,
+        "modeTag": "no_session_flip_p009"
+      }
+    }
+  ]
+}

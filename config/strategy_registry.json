@@ -1,0 +1,180 @@
+{
+  "bos_choch_v1": {
+    "setup_id": "bos_choch_v1",
+    "family": "bos_choch",
+    "status": "prod",
+    "display_name": "BOS/CHOCH v1",
+    "description": "Break of structure (BOS) and change of character (CHOCH) hybrid. Trend continuation after structure break with optional retest.",
+    "tradingview_names": ["NP BOS CHOCH Hybrid v6", "BOS CHOCH v6"],
+    "timeframes": ["1", "5"],
+    "symbol_scope": ["XAUUSD"],
+    "version": 1,
+    "logic": {
+      "market_structure": [
+        "Detect swing highs/lows (pivot)",
+        "BOS = break of last swing high/low",
+        "CHOCH = first break against trend"
+      ],
+      "entry": [
+        "Enter on BOS in direction of trend",
+        "Optional: require retest of broken level"
+      ],
+      "risk": [
+        "SL below/above structure",
+        "TP at R multiple or next liquidity"
+      ],
+      "filters": [
+        "Session filter (NY open, etc.)",
+        "Volatility filter (ATR)"
+      ]
+    },
+    "source": {
+      "type": "tradingview_pine",
+      "repo_path": "trading/strategies/bos_choch_strategy_v6.pine"
+    }
+  },
+  "fx_nyopen20_orb2_state": {
+    "setup_id": "fx_nyopen20_orb2_state",
+    "family": "orb",
+    "status": "prod",
+    "display_name": "FX NY Open ORB2 (state)",
+    "description": "Opening range breakout around NY session. State-based logic: ORB high/low, invalidation, time filters. Canonical PROD for ORB family.",
+    "tradingview_names": ["FX NY Open ORB2", "ORB2 State"],
+    "timeframes": ["5", "15"],
+    "symbol_scope": ["EUR_USD", "GBP_USD", "USD_JPY"],
+    "version": 2,
+    "logic": {
+      "market_structure": [
+        "Opening range (OR) from session open",
+        "OR high / OR low as key levels"
+      ],
+      "entry": [
+        "Break of OR high (long) or OR low (short)",
+        "State machine: pending / filled / invalidated"
+      ],
+      "risk": [
+        "SL: opposite side of OR or ATR-based",
+        "TP: R multiple or trailing"
+      ],
+      "filters": [
+        "NY open session",
+        "OR duration / volatility"
+      ]
+    },
+    "source": {
+      "type": "tradingview_pine",
+      "repo_path": "trading/backend/services/patterns/fxNyOpenOrb2.js"
+    }
+  },
+  "super_ai_elite_v2": {
+    "setup_id": "super_ai_elite_v2",
+    "family": "super_ai_elite",
+    "status": "prod",
+    "display_name": "Super AI Elite v2",
+    "description": "AI/ML-enhanced elite strategy. Champion path recommended with recent data (2025–2026).",
+    "tradingview_names": [],
+    "timeframes": ["5", "15"],
+    "symbol_scope": [],
+    "version": 2,
+    "logic": {
+      "market_structure": [],
+      "entry": [],
+      "risk": [],
+      "filters": []
+    },
+    "source": {
+      "type": "tradingview_pine",
+      "repo_path": ""
+    }
+  },
+  "super_ai_elite_v2_long": {
+    "setup_id": "super_ai_elite_v2_long",
+    "family": "super_ai_elite",
+    "status": "prod",
+    "display_name": "Super AI Elite v2 Long",
+    "description": "Long-only Elite setup. Stats isolated from shorts; selector can choose long in bullish regime.",
+    "tradingview_names": [],
+    "timeframes": ["1", "5", "15"],
+    "symbol_scope": [],
+    "version": 2,
+    "logic": {
+      "market_structure": ["EMA 8/21/50/200", "VWAP", "7-layer NN"],
+      "entry": ["Long only: trend + momentum + volume + volatility + macro alignment"],
+      "risk": ["Percentage SL/TP by risk mode", "Confidence decay after consecutive losses"],
+      "filters": ["Regime TRENDING/SIDEWAYS/VOLATILE", "close > VWAP", "macro_trend_strength > -0.02"]
+    },
+    "source": {
+      "type": "tradingview_pine",
+      "repo_path": "elite_v2_long.pine"
+    }
+  },
+  "super_ai_elite_v2_short": {
+    "setup_id": "super_ai_elite_v2_short",
+    "family": "super_ai_elite",
+    "status": "prod",
+    "display_name": "Super AI Elite v2 Short",
+    "description": "Short-only Elite with bearish gating (2/3: price<EMA200, slope EMA200<0, price<VWAP/MA50), optional OR low gate, tighter stop and max loss cap; exit on reclaim VWAP.",
+    "tradingview_names": [],
+    "timeframes": ["1", "5", "15"],
+    "symbol_scope": [],
+    "version": 2,
+    "logic": {
+      "market_structure": ["EMA 8/21/50/200", "VWAP", "7-layer NN", "OR high/low optional"],
+      "entry": ["Short only when bearish regime 2/3", "Optional: short only if below OR low (NY open)"],
+      "risk": ["Tighter stop (0.75x)", "Max loss cap -1.2R", "Exit if price reclaims VWAP (anti-squeeze)"],
+      "filters": ["Bearish gate 2/3", "OR gate optional", "trend_short + momentum_short + volume + volatility"]
+    },
+    "source": {
+      "type": "tradingview_pine",
+      "repo_path": "elite_v2_short.pine"
+    }
+  },
+  "ultrascalp_v4_history": {
+    "setup_id": "ultrascalp_v4_history",
+    "family": "ultrascalp",
+    "status": "archived",
+    "display_name": "Ultrascalp v4 (history)",
+    "description": "Long history dataset (e.g. TF=5, 2006→2022). Importable for reference; excluded from champion path and rankings.",
+    "tradingview_names": [],
+    "timeframes": ["5"],
+    "symbol_scope": [],
+    "version": 4,
+    "logic": {},
+    "source": {
+      "type": "archive",
+      "repo_path": ""
+    }
+  },
+  "orb_v1": {
+    "setup_id": "orb_v1",
+    "family": "orb",
+    "status": "archived",
+    "display_name": "ORB v1 (legacy)",
+    "description": "Legacy ORB. Alias maps to fx_nyopen20_orb2_state at import.",
+    "tradingview_names": [],
+    "timeframes": [],
+    "symbol_scope": [],
+    "version": 1,
+    "logic": {},
+    "source": {
+      "type": "alias",
+      "canonical_setup_id": "fx_nyopen20_orb2_state"
+    }
+  },
+  "opening_range_breakout_v1": {
+    "setup_id": "opening_range_breakout_v1",
+    "family": "orb",
+    "status": "archived",
+    "display_name": "Opening Range Breakout v1 (legacy)",
+    "description": "Legacy ORB alias. Maps to fx_nyopen20_orb2_state at import.",
+    "tradingview_names": [],
+    "timeframes": [],
+    "symbol_scope": [],
+    "version": 1,
+    "logic": {},
+    "source": {
+      "type": "alias",
+      "canonical_setup_id": "fx_nyopen20_orb2_state"
+    }
+  }
+}

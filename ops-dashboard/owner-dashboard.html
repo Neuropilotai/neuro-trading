@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NeuroPilot Owner Ops Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="owner-styles.css" />
+</head>
+<body>
+  <div class="owner-wrap">
+    <header class="owner-header">
+      <h1>NeuroPilot Owner Ops Dashboard</h1>
+      <p class="owner-sub">
+        Executive operational view — alerts, execution health, reconciliation, data freshness, drift.
+      </p>
+      <p class="owner-scope-note">
+        <strong>Scope:</strong> This page is the <strong>execution / reconciliation / data-freshness</strong> slice from static snapshot JSON.
+        It is <strong>not</strong> a full picture of evolution runs, promotion health, or strategy-level alerts — use the Evolution Ops dashboard for that.
+      </p>
+      <div class="owner-meta-row">
+        <span>Last updated: <strong id="lastUpdated">—</strong></span>
+        <span>Environment: <strong id="environmentLabel">—</strong></span>
+        <span>Snapshot: <strong id="snapshotAgeLine">—</strong></span>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="refreshBtn">Refresh now</button>
+      </div>
+      <p id="loadStatus" class="status-bar" aria-live="polite"></p>
+    </header>
+
+    <div class="status-pill-wrap">
+      <div id="overallPill" class="status-pill healthy" role="status" aria-label="Overall status">HEALTHY</div>
+      <p class="headline-note">
+        Headline reflects operational state (reconciliation, snapshot, freshness) combined with the alert feed — not alert row count alone.
+      </p>
+    </div>
+
+    <div class="kpi-grid" aria-label="Key metrics">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Alerts</div>
+        <div id="kpiAlertsTotal" class="kpi-value">0</div>
+        <div id="kpiAlertsSub" class="kpi-sub">0 crit / 0 warn / 0 info</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Reconciliation</div>
+        <div id="kpiRecon" class="kpi-value sm kpi-val-ok">OK</div>
+        <div id="kpiReconSub" class="kpi-sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Data Freshness</div>
+        <div id="kpiFresh" class="kpi-value sm kpi-val-ok">Fresh</div>
+        <div id="kpiFreshSub" class="kpi-sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Drift / Model</div>
+        <div id="kpiDrift" class="kpi-value sm kpi-val-ok">Stable</div>
+        <div id="kpiDriftSub" class="kpi-sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Latest Snapshot</div>
+        <div id="kpiSnap" class="kpi-value sm">—</div>
+        <div id="kpiSnapSub" class="kpi-sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Alert Delivery</div>
+        <div id="kpiWebhook" class="kpi-value sm kpi-val-neutral">N/A</div>
+        <div id="kpiWebhookSub" class="kpi-sub">Webhook delivery is not reported in snapshot files.</div>
+      </div>
+    </div>
+
+    <section class="decision-panel" aria-labelledby="decisionTitle">
+      <h2 id="decisionTitle">What needs attention now</h2>
+      <div id="decisionBody" class="decision-body">Loading…</div>
+      <div id="decisionAction" class="decision-action"></div>
+    </section>
+
+    <section class="section lagging-section" aria-labelledby="laggingTitle">
+      <h2 id="laggingTitle">Lagging pressure</h2>
+      <p class="lagging-section-note muted">
+        Read-only projection from <code>datasets_freshness.json</code> and <code>owner_transition_alerts.json</code> — no freshness logic in the browser.
+      </p>
+      <div id="laggingPressureBody" class="lagging-card">Loading…</div>
+    </section>
+
+    <section class="approval-center" aria-labelledby="approvalTitle">
+      <h2 id="approvalTitle">Owner Approval Center</h2>
+      <p class="approval-sub">
+        Approve, pass, or defer the next recommended research and upgrades before execution.
+      </p>
+      <div class="approval-summary-row" aria-label="Approval summary counts">
+        <div class="approval-kpi">
+          <div class="approval-kpi-label">Pending recommendations</div>
+          <div id="approvalKpiPending" class="approval-kpi-value">0</div>
+          <div class="approval-kpi-sub">waiting for owner decision</div>
+        </div>
+        <div class="approval-kpi">
+          <div class="approval-kpi-label">Approved for next run</div>
+          <div id="approvalKpiApproved" class="approval-kpi-value">0</div>
+        </div>
+        <div class="approval-kpi">
+          <div class="approval-kpi-label">Passed / blocked / deferred</div>
+          <div id="approvalKpiClosed" class="approval-kpi-value">0</div>
+        </div>
+      </div>
+      <p id="approvalSummaryLine" class="approval-summary-text"></p>
+      <p id="approvalSnapshotSummary" class="approval-summary-text approval-snapshot-kpi" aria-live="polite"></p>
+      <div id="approvalHealthWrap" class="approval-health-wrap" aria-label="Approval control health">
+        <span class="approval-health-label">Control health</span>
+        <span id="approvalHealthPill" class="approval-health-pill health-unknown" role="status">UNKNOWN</span>
+      </div>
+      <p class="approval-wire-note">
+        <strong>v2 writeback:</strong> With the trading server on HTTP, set <code>NEUROPILOT_OWNER_APPROVAL_API=1</code> (and
+        <code>NEUROPILOT_OWNER_APPROVAL_TOKEN</code> in production). Optionally set
+        <code>localStorage.setItem(&quot;np_owner_approval_api_token&quot;, &quot;…&quot;)</code> for the header. Clicks POST to
+        <code>/api/ops/owner-approval</code> and update <code>owner_approval_state.json</code> + <code>owner_approval_history.json</code>.
+        Offline / static hosting: use <code>npm run ops:owner-approval -- record &lt;id&gt; &lt;action&gt;</code>.
+        If POST fails, the choice is kept in this browser only until you run the CLI or fix the API.
+      </p>
+      <p id="approvalApiStatus" class="approval-api-status" aria-live="polite"></p>
+      <p class="approval-actions-global">
+        <button type="button" class="btn-ghost" id="approvalResetLocal">Reset local decisions</button>
+      </p>
+      <div id="approvalCards" class="approval-cards"></div>
+    </section>
+
+    <section class="section" aria-labelledby="feedTitle">
+      <h2 id="feedTitle">Active alerts feed</h2>
+      <div class="owner-table-wrap">
+        <table class="owner-table" id="alertsTable">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Code</th>
+              <th>Message</th>
+              <th>Source</th>
+              <th>First seen</th>
+              <th>Last seen</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="alertsTbody">
+            <tr><td colspan="8" class="empty-feed">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="breakdownTitle">
+      <h2 id="breakdownTitle">Operational health breakdown</h2>
+      <div class="breakdown-grid">
+        <div class="breakdown-card">
+          <h3>Execution</h3>
+          <ul id="execList"></ul>
+        </div>
+        <div class="breakdown-card">
+          <h3>Reconciliation</h3>
+          <ul id="reconList"></ul>
+        </div>
+        <div class="breakdown-card">
+          <h3>Data freshness</h3>
+          <ul id="dataList"></ul>
+        </div>
+        <div class="breakdown-card">
+          <h3>Drift &amp; governance</h3>
+          <ul id="driftGovList"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="impactTitle">
+      <h2 id="impactTitle">Business impact assessment</h2>
+      <div id="businessImpact" class="impact-box">—</div>
+    </section>
+
+    <section class="section" aria-labelledby="recTitle">
+      <h2 id="recTitle">Recommended next actions</h2>
+      <div id="recommendedActions" class="actions-box">—</div>
+    </section>
+
+    <p class="nav-tech muted">
+      Technical evolution view:
+      <a href="index.html">NeuroPilot — Evolution Ops</a>
+      · Regenerate snapshot:
+      <code>node engine/evolution/scripts/exportOpsSnapshot.js</code>
+    </p>
+  </div>
+
+  <script src="owner-app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "version": "phase_a_regime_v1",
+  "tags": [
+    "trend",
+    "range",
+    "high_vol",
+    "low_vol",
+    "news_day",
+    "session_us",
+    "session_eu",
+    "session_asia"
+  ],
+  "definitions": {
+    "trend": "HTF direction aligned and directional persistence above baseline",
+    "range": "Compression / mean-reverting structure with low directional persistence",
+    "high_vol": "Realized volatility above rolling threshold",
+    "low_vol": "Realized volatility below rolling threshold",
+    "news_day": "Major macro/earnings event day in active session",
+    "session_us": "13:00-21:00 UTC",
+    "session_eu": "07:00-16:00 UTC",
+    "session_asia": "00:00-09:00 UTC"
+  }
+}

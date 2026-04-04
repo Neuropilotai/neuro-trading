@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.neuropilot.nearlive</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>bash</string>
+      <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/ops/launchd/run-nearlive.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NEUROPILOT_DATA_ROOT</key>
+      <string>/Volumes/TradingDrive/NeuroPilotAI</string>
+      <key>NEUROPILOT_CRITICAL_DATASETS</key>
+      <string>BTCUSDT_5m,BTCUSDT_1h,ETHUSDT_5m,ETHUSDT_1h,SOLUSDT_5m,SOLUSDT_1h,BNBUSDT_5m,BNBUSDT_1h,ADAUSDT_5m,ADAUSDT_1h,XRPUSDT_5m,XRPUSDT_1h,XAUUSD_5m,XAUUSD_1h</string>
+      <key>NEUROPILOT_PARTIAL_DEGRADE_ON_STALE</key>
+      <string>1</string>
+      <key>NEUROPILOT_SOFT_MONITOR_DATASETS</key>
+      <string>AAPL_5m,AAPL_1h,IWM_5m,IWM_1h,NVDA_5m,NVDA_1h,QQQ_5m,QQQ_1h,SPY_5m,SPY_1h,TSLA_5m,TSLA_1h</string>
+      <key>NEUROPILOT_ENV_FILE</key>
+      <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/.env</string>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/nearlive.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/nearlive.err.log</string>
+  </dict>
+</plist>

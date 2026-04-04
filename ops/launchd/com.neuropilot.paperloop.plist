@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Paper refresh chain + governance dashboard loop (login session).
+  Install (manual):
+    mkdir -p ~/Library/LaunchAgents
+    cp ops/launchd/com.neuropilot.paperloop.plist ~/Library/LaunchAgents/
+    launchctl unload ~/Library/LaunchAgents/com.neuropilot.paperloop.plist 2>/dev/null || true
+    launchctl load ~/Library/LaunchAgents/com.neuropilot.paperloop.plist
+  Edit WorkingDirectory / paths below if your repo or data root differ.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.neuropilot.paperloop</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/engine/scripts/runPaperLoopWithDashboard.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NEUROPILOT_DATA_ROOT</key>
+      <string>/Volumes/TradingDrive/NeuroPilotAI</string>
+      <key>NEUROPILOT_PAPER_LOOP_INTERVAL_SEC</key>
+      <string>300</string>
+      <key>NEUROPILOT_WAVE1_SYMBOLS</key>
+      <string>BTCUSDT,SPY,XRPUSDT</string>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Volumes/TradingDrive/NeuroPilotAI/logs/launchd_paperloop.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Volumes/TradingDrive/NeuroPilotAI/logs/launchd_paperloop.err.log</string>
+  </dict>
+</plist>

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+V2_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+export NEUROPILOT_DATA_ROOT="${NEUROPILOT_DATA_ROOT:-${V2_ROOT}/data_workspace}"
+export NEUROPILOT_REPO_ROOT="${NEUROPILOT_REPO_ROOT:-${V2_ROOT}}"
+
+node "${SCRIPT_DIR}/expandMultiMarketWave1.js" --write-setups --append-promoted-templates
+
+export NEUROPILOT_WAVE1_SYMBOLS="${NEUROPILOT_WAVE1_SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSD,SPY,QQQ}"
+export NEUROPILOT_WAVE1_PAPER_MAX_TOTAL="${NEUROPILOT_WAVE1_PAPER_MAX_TOTAL:-160}"
+export NEUROPILOT_WAVE1_PAPER_MAX_SIGNALS_PER_SYMBOL="${NEUROPILOT_WAVE1_PAPER_MAX_SIGNALS_PER_SYMBOL:-8}"
+
+node "${SCRIPT_DIR}/buildPromotedManifest.js"
+
+export NEUROPILOT_WAVE1_FORCE_SIGNALS="${NEUROPILOT_WAVE1_FORCE_SIGNALS:-1}"
+node "${SCRIPT_DIR}/buildPaperExecutionV1SignalsWave1.js"

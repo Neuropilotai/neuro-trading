@@ -1,0 +1,29 @@
+{
+  "manifestSchemaVersion": 1,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "sourceArtifact": "manual_copy_from_fixtures",
+  "itemCount": 1,
+  "skippedCount": 0,
+  "items": [
+    {
+      "setupId": "REPLACE_WITH_PROMOTED_SETUP_ID",
+      "strategyId": "REPLACE_WITH_PROMOTED_SETUP_ID",
+      "rules": {
+        "session_phase": "open",
+        "body_pct_min": 0.5,
+        "close_strength_min": 0.55,
+        "volume_ratio": 1
+      },
+      "datasetKey": "REPLACE_WITH_MANIFEST_DATASET_KEY",
+      "symbol": "BTCUSDT",
+      "timeframe": "5m",
+      "barIndex": 0,
+      "entryAtBarClose": true,
+      "stopDistance": 0.25,
+      "direction": "long",
+      "rMultiple": 1.5,
+      "maxBarsHeld": 500
+    }
+  ],
+  "skipped": []
+}

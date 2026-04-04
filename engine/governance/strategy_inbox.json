@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "strategyId": "orb_breakout_candidate_v1",
+      "status": "pending_review",
+      "priority": "high",
+      "source": "manual",
+      "addedAt": "2026-03-23T00:00:00.000Z",
+      "notes": "Run on XAUUSD and BTCUSDT for multi-market validation."
+    }
+  ]
+}

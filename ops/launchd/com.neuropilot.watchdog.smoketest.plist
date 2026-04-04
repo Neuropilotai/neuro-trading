@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.neuropilot.watchdog.smoketest</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>-lc</string>
+      <string>cd /Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2 &amp;&amp; set -a &amp;&amp; [ -f .env ] &amp;&amp; . ./.env || true; set +a; NEUROPILOT_WATCHDOG_ONE_SHOT=1 NEUROPILOT_WATCHDOG_FORCE_CRIT=1 NEUROPILOT_DATA_ROOT=/Volumes/TradingDrive/NeuroPilotAI node engine/scripts/opsWatchdog.js</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>9</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/watchdog_smoketest.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/watchdog_smoketest.err.log</string>
+  </dict>
+</plist>

@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to <NEUROPILOT_DATA_ROOT>/governance/paper_execution_v1_signals.json and set NEUROPILOT_PAPER_EXEC_V1=1 before full pipeline (or run node engine/governance/runPaperExecutionV1.js). For 10 synthetic strategies (metrics V2 / learning), use paper_execution_v1_signals_multi_strategy.example.json + fixtures/README_PAPER_SIGNALS_MULTI.md.",
+  "signals": [
+    {
+      "strategyId": "example_SPY_5m_bar_close",
+      "datasetKey": "SPY_5m",
+      "barIndex": 400,
+      "entryAtBarClose": true,
+      "stopDistance": 0.5,
+      "direction": "long",
+      "rMultiple": 2,
+      "maxBarsHeld": 500
+    }
+  ]
+}

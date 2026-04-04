@@ -1,0 +1,39 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# dependencies
+node_modules/
+
+# macOS
+.DS_Store
+
+# logs
+*.log
+logs/
+nightly_logs/
+
+# temp / smoke
+.tmp-*/
+.tmp*
+debug_*.log
+meta_debug.log
+run.log
+overnight*.log
+smart-loop.log
+nearlive.log
+nextgen_*.log
+fullrun_*.log
+fullpipeline_*.log
+nightly_lab_launchd.*.log
+
+# runtime / local state
+backups/
+data/
+data_workspace/
+ops-snapshot/
+
+# editor / misc
+0
+1

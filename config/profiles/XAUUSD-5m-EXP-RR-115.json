@@ -1,0 +1,91 @@
+{
+  "name": "XAUUSD-5m-EXP-RR-115",
+  "description": "EXP: RR relaxed - minRRWithOB = 1.15 (vs 1.1) - Test volume vs quality",
+  "version": "1.0.0",
+  "created": "2026-02-06",
+  "status": "EXPERIMENTAL",
+  "symbol": "XAUUSD",
+  "timeframe": "5",
+  
+  "metadata": {
+    "note": "Single change from PROD: risk.minRRWithOB = 1.15",
+    "baseline": "XAUUSD-5m-PROD"
+  },
+
+  "or15": {
+    "enabled": true,
+    "sessionMode": "SESSION",
+    "sessionStartHourUTC": 14,
+    "sessionStartMinuteUTC": 30,
+    "softMode": true,
+    "breakPct": 0.0008,
+    "reenterBars": 3,
+    "stayBars": 6,
+    "rangeTimeShare": 0.65,
+    "rangeLookbackBars": 36,
+    "openDriveBodyPct": 0.0012
+  },
+
+  "gate": {
+    "blockOnUnknown": false,
+    "allowPatternOverrides": false,
+    "softMode": true,
+    "maxOrLowDistFrac": 0.80,
+    "maxOrLowDistATRMult": 0.35,
+    "emaSlopeMin": -0.0030
+  },
+
+  "confirmation": {
+    "softClosePass": true,
+    "softCloseATRBuffer": 0.08,
+    "softClosePosMin": 0.50
+  },
+
+  "orderBlock": {
+    "enabled": true,
+    "hardFilter": false,
+    "rrRelax": true,
+    "rrRelaxDelta": 0.10,
+    "rrRelaxThreshold": 0.75,
+    "lookbackBars": 60,
+    "dispBars": 4,
+    "minBodyPct": 0.0006,
+    "minRangeATR": 0.8,
+    "dispBufferATR": 0.05,
+    "minDispPct": 0.0012,
+    "maxEntryDistATR": 0.15
+  },
+
+  "risk": {
+    "minRR": {
+      "mean_reversion": 1.1,
+      "support_touch": 1.2
+    },
+    "minRRWithOB": 1.15
+  },
+
+  "exit": {
+    "partialTP": {
+      "enabled": true,
+      "tp1Pct": 0.0020,
+      "tp1CloseFraction": 0.5,
+      "runnerTrailATR": 0.10,
+      "runnerLockPct": 0.0008
+    },
+    "stopLossATRMult": 1.5,
+    "takeProfitATRMult": 1.2,
+    "maxHoldBars": 15
+  },
+
+  "costs": {
+    "spreadPct": 0.0005,
+    "slippagePct": 0.0002
+  },
+
+  "patternDetection": {
+    "minWindow": 5,
+    "maxWindow": 20,
+    "windowStep": 2
+  }
+}
+

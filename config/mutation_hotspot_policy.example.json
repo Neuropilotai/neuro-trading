@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Full example incl. optional pattern_001 rule. For first rollout prefer mutation_hotspot_policy.phase1_safe.json (3 rules only). See engine/evolution/HOTSPOT_POLICY_VALIDATION_RUNBOOK.md",
+  "rules": [
+    {
+      "note": "Audit champion: 16 rejects, 15 far; parameter_jitter + forced_family_shift",
+      "match": { "equals": "mut_2c9c6f_close_f17d88" },
+      "profilePatch": {
+        "jitterScaleMultiply": 0.65,
+        "jitterScaleMin": 0.75,
+        "forcedFamilyShiftWeight": 0,
+        "modeTag": "mut_2c9c6f"
+      }
+    },
+    {
+      "note": "Audit champion: 9/9 far, session_flip dominant",
+      "match": { "prefix": "pattern_010_close_" },
+      "profilePatch": {
+        "sessionFlipWeight": 0,
+        "modeTag": "no_session_flip_p010"
+      }
+    },
+    {
+      "note": "Audit champion: pattern_009 close lineage mostly far",
+      "match": { "prefix": "pattern_009_close_" },
+      "profilePatch": {
+        "sessionFlipWeight": 0,
+        "modeTag": "no_session_flip_p009"
+      }
+    },
+    {
+      "note": "Optional: global audit hotspot pattern_001_open_cf4dce — tune before enabling",
+      "match": { "equals": "pattern_001_open_cf4dce" },
+      "profilePatch": {
+        "jitterScaleMultiply": 0.85,
+        "jitterScaleMin": 0.8,
+        "forcedFamilyShiftWeight": 0,
+        "modeTag": "p001_open_cf4dce"
+      }
+    }
+  ]
+}

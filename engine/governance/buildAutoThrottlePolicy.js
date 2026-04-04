@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * CLI: writes <DATA_ROOT>/governance/auto_throttle_policy.json
+ * Env: NEUROPILOT_DATA_ROOT, NEUROPILOT_OPS_SNAPSHOT_DIR
+ */
+
+const fs = require('fs');
+const path = require('path');
+const {
+  loadInputsForAutoThrottleBuild,
+  buildAutoThrottlePolicy,
+  policyDocumentForWrite,
+  writeAutoThrottlePolicy,
+} = require('./autoThrottlePolicyCore');
+
+function main() {
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const dataRoot = process.env.NEUROPILOT_DATA_ROOT
+    ? path.resolve(process.env.NEUROPILOT_DATA_ROOT)
+    : path.join(repoRoot, 'data_workspace');
+  const opsDir = process.env.NEUROPILOT_OPS_SNAPSHOT_DIR
+    ? path.resolve(process.env.NEUROPILOT_OPS_SNAPSHOT_DIR)
+    : path.join(repoRoot, 'ops-snapshot');
+
+  const roots = { dataRoot, repoRoot, opsDir };
+  let inputs;
+  try {
+    inputs = loadInputsForAutoThrottleBuild(roots);
+  } catch (e) {
+    console.error(`[buildAutoThrottlePolicy] load inputs FAILED: ${e && e.message ? e.message : e}`);
+    process.exit(1);
+  }
+
+  let doc;
+  try {
+    doc = buildAutoThrottlePolicy(inputs);
+  } catch (e) {
+    console.error(`[buildAutoThrottlePolicy] build FAILED: ${e && e.message ? e.message : e}`);
+    process.exit(1);
+  }
+
+  const gov = path.join(dataRoot, 'governance');
+  fs.mkdirSync(gov, { recursive: true });
+  const outPath = path.join(gov, 'auto_throttle_policy.json');
+  const toWrite = policyDocumentForWrite(doc);
+  writeAutoThrottlePolicy(outPath, doc);
+
+  const statusPath = path.join(opsDir, 'auto_throttle_policy_build_status.json');
+  try {
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    fs.writeFileSync(
+      statusPath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          ok: true,
+          generatedAt: toWrite.generatedAt,
+          outPath,
+          policyMode: toWrite.policyMode,
+          summary: toWrite.summary,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+  } catch {
+    /* optional */
+  }
+
+  console.log(
+    JSON.stringify({
+      ok: true,
+      path: outPath,
+      policyMode: toWrite.policyMode,
+      summary: toWrite.summary,
+    })
+  );
+}
+
+if (require.main === module) main();
+
+module.exports = { main };

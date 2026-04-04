@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2026-03-24T00:00:00Z",
+  "symbols": [
+    "XAUUSD",
+    "NAS100",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "ADAUSDT",
+    "XRPUSDT"
+  ],
+  "timeframes": [
+    "1",
+    "5"
+  ],
+  "providerMapping": {
+    "forex": "oanda",
+    "cfd": "oanda",
+    "default": "oanda"
+  },
+  "maxHistoryBars": {
+    "1": 60000,
+    "5": 10000
+  },
+  "symbolMetadata": {
+    "XAUUSD": {
+      "instrumentId": "FX:OANDA:XAUUSD",
+      "assetClass": "FX",
+      "venue": "OANDA",
+      "symbol": "XAUUSD",
+      "currency": "USD",
+      "tickSize": 0.01,
+      "session": "FX",
+      "provider": "oanda"
+    },
+    "NAS100": {
+      "instrumentId": "CFD:OANDA:NAS100",
+      "assetClass": "CFD",
+      "venue": "OANDA",
+      "symbol": "NAS100",
+      "currency": "USD",
+      "tickSize": 1,
+      "session": "24x7",
+      "provider": "oanda"
+    },
+    "EURUSD": {
+      "instrumentId": "FX:OANDA:EURUSD",
+      "assetClass": "FX",
+      "venue": "OANDA",
+      "symbol": "EURUSD",
+      "currency": "USD",
+      "tickSize": 0.0001,
+      "session": "FX",
+      "provider": "oanda"
+    },
+    "GBPUSD": {
+      "instrumentId": "FX:OANDA:GBPUSD",
+      "assetClass": "FX",
+      "venue": "OANDA",
+      "symbol": "GBPUSD",
+      "currency": "USD",
+      "tickSize": 0.0001,
+      "session": "FX",
+      "provider": "oanda"
+    },
+    "USDJPY": {
+      "instrumentId": "FX:OANDA:USDJPY",
+      "assetClass": "FX",
+      "venue": "OANDA",
+      "symbol": "USDJPY",
+      "currency": "JPY",
+      "tickSize": 0.01,
+      "session": "FX",
+      "provider": "oanda"
+    },
+    "ADAUSDT": {
+      "instrumentId": "CRYPTO:BINANCE:ADAUSDT",
+      "assetClass": "CRYPTO",
+      "venue": "BINANCE",
+      "symbol": "ADAUSDT",
+      "currency": "USDT",
+      "tickSize": 0.0001,
+      "session": "24x7",
+      "provider": "binance"
+    },
+    "XRPUSDT": {
+      "instrumentId": "CRYPTO:BINANCE:XRPUSDT",
+      "assetClass": "CRYPTO",
+      "venue": "BINANCE",
+      "symbol": "XRPUSDT",
+      "currency": "USDT",
+      "tickSize": 0.0001,
+      "session": "24x7",
+      "provider": "binance"
+    }
+  }
+}

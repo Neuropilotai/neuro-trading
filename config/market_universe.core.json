@@ -1,0 +1,32 @@
+{
+  "version": "phase_a_core_v1",
+  "markets": [
+    {
+      "symbol": "XAUUSD",
+      "enabled": true,
+      "provider": "oanda",
+      "timeframes": ["5m", "15m", "1h"],
+      "slippageBps": 3,
+      "commissionBps": 2,
+      "notes": "Metals / FX proxy"
+    },
+    {
+      "symbol": "BTCUSDT",
+      "enabled": true,
+      "provider": "binance",
+      "timeframes": ["5m", "15m", "1h"],
+      "slippageBps": 5,
+      "commissionBps": 4,
+      "notes": "Crypto spot"
+    },
+    {
+      "symbol": "EURUSD",
+      "enabled": false,
+      "provider": "oanda",
+      "timeframes": ["5m", "15m", "1h"],
+      "slippageBps": 2,
+      "commissionBps": 1,
+      "notes": "Standby for Phase B"
+    }
+  ]
+}

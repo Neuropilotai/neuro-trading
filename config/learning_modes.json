@@ -1,0 +1,86 @@
+{
+  "defaultMode": "core_3m",
+  "modes": {
+    "core_3m": {
+      "description": "Phase A core mode: recent learning nucleus, paper only",
+      "lookbackDays": 90,
+      "paperOnly": true,
+      "liveTradingEnabled": false,
+      "maxMarkets": 2,
+      "maxFamilies": 10,
+      "allowedFamilies": [
+        "breakout",
+        "pullback",
+        "momentum",
+        "mean_reversion",
+        "volatility_expansion",
+        "opening_range"
+      ],
+      "promotionGuard": {
+        "minTrades": 40,
+        "minExpectancy": 0,
+        "maxDrawdownPct": 25,
+        "minProfitFactor": 1.05,
+        "maxTopTradesPnlShare": 0.65,
+        "requireWalkForwardPass": true,
+        "targetEnvironment": "paper"
+      }
+    },
+    "expand_6m": {
+      "description": "Phase B expansion mode: broaden lookback while staying paper-first",
+      "lookbackDays": 180,
+      "paperOnly": true,
+      "liveTradingEnabled": false,
+      "maxMarkets": 5,
+      "maxFamilies": 14,
+      "allowedFamilies": [
+        "breakout",
+        "pullback",
+        "momentum",
+        "mean_reversion",
+        "volatility_expansion",
+        "opening_range",
+        "fvg",
+        "vwap_reversion",
+        "ema_trend_continuation"
+      ],
+      "promotionGuard": {
+        "minTrades": 60,
+        "minExpectancy": 0,
+        "maxDrawdownPct": 22,
+        "minProfitFactor": 1.08,
+        "maxTopTradesPnlShare": 0.6,
+        "requireWalkForwardPass": true,
+        "targetEnvironment": "paper"
+      }
+    },
+    "portfolio_multi_market": {
+      "description": "Phase C/D portfolio mode: wider market set, still guard-railed",
+      "lookbackDays": 365,
+      "paperOnly": false,
+      "liveTradingEnabled": true,
+      "maxMarkets": 12,
+      "maxFamilies": 20,
+      "allowedFamilies": [
+        "breakout",
+        "pullback",
+        "momentum",
+        "mean_reversion",
+        "volatility_expansion",
+        "opening_range",
+        "fvg",
+        "vwap_reversion",
+        "ema_trend_continuation"
+      ],
+      "promotionGuard": {
+        "minTrades": 80,
+        "minExpectancy": 0,
+        "maxDrawdownPct": 20,
+        "minProfitFactor": 1.1,
+        "maxTopTradesPnlShare": 0.55,
+        "requireWalkForwardPass": true,
+        "targetEnvironment": "paper_then_live"
+      }
+    }
+  }
+}

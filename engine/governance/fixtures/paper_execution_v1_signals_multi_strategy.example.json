@@ -1,0 +1,106 @@
+{
+  "_doc": "Copy to $NEUROPILOT_DATA_ROOT/governance/paper_execution_v1_signals.json — requires same NEUROPILOT_DATA_ROOT as buildGovernanceDashboard. Set NEUROPILOT_PAPER_EXEC_V1=1 for pipeline step 8.8 or run runPaperExecutionV1.js. Labels are synthetic (lab_*) for metrics V2 / learning V1 only; not wired to discovery strategies.",
+  "_requires": "datasetKey entries must exist in datasets_manifest.json (e.g. after expanded data engine). Missing .bin → signal skipped with log line.",
+  "signals": [
+    {
+      "strategyId": "lab_breakout_open_SPY_5m_long",
+      "datasetKey": "SPY_5m",
+      "barIndex": 420,
+      "entryAtBarClose": true,
+      "stopDistance": 0.5,
+      "direction": "long",
+      "rMultiple": 2,
+      "maxBarsHeld": 400
+    },
+    {
+      "strategyId": "lab_breakout_mid_QQQ_5m_long",
+      "datasetKey": "QQQ_5m",
+      "barIndex": 480,
+      "entryAtBarClose": true,
+      "stopDistance": 0.4,
+      "direction": "long",
+      "rMultiple": 1.5,
+      "maxBarsHeld": 350
+    },
+    {
+      "strategyId": "lab_breakout_close_IWM_5m_short",
+      "datasetKey": "IWM_5m",
+      "barIndex": 520,
+      "entryAtBarClose": true,
+      "stopDistance": 0.6,
+      "direction": "short",
+      "rMultiple": 2.5,
+      "maxBarsHeld": 450
+    },
+    {
+      "strategyId": "lab_mean_reversion_SPY_5m_short",
+      "datasetKey": "SPY_5m",
+      "barIndex": 600,
+      "entryAtBarClose": true,
+      "stopDistance": 0.35,
+      "direction": "short",
+      "rMultiple": 2,
+      "maxBarsHeld": 300
+    },
+    {
+      "strategyId": "lab_mean_reversion_QQQ_1h_long",
+      "datasetKey": "QQQ_1h",
+      "barIndex": 300,
+      "entryAtBarClose": true,
+      "stopDistance": 1.0,
+      "direction": "long",
+      "rMultiple": 3,
+      "maxBarsHeld": 120
+    },
+    {
+      "strategyId": "lab_volatility_expansion_SPY_1h_long",
+      "datasetKey": "SPY_1h",
+      "barIndex": 250,
+      "entryAtBarClose": true,
+      "stopDistance": 1.2,
+      "direction": "long",
+      "rMultiple": 2,
+      "maxBarsHeld": 100
+    },
+    {
+      "strategyId": "lab_volatility_expansion_IWM_1h_short",
+      "datasetKey": "IWM_1h",
+      "barIndex": 280,
+      "entryAtBarClose": true,
+      "stopDistance": 1.0,
+      "direction": "short",
+      "rMultiple": 1.5,
+      "maxBarsHeld": 100
+    },
+    {
+      "strategyId": "lab_momentum_continuation_QQQ_5m_long",
+      "datasetKey": "QQQ_5m",
+      "barIndex": 700,
+      "entryAtBarClose": true,
+      "stopDistance": 0.55,
+      "direction": "long",
+      "rMultiple": 2.5,
+      "maxBarsHeld": 500
+    },
+    {
+      "strategyId": "lab_momentum_continuation_SPY_5m_short",
+      "datasetKey": "SPY_5m",
+      "barIndex": 780,
+      "entryAtBarClose": true,
+      "stopDistance": 0.45,
+      "direction": "short",
+      "rMultiple": 2,
+      "maxBarsHeld": 400
+    },
+    {
+      "strategyId": "lab_momentum_continuation_BTCUSDT_5m_long",
+      "datasetKey": "BTCUSDT_5m",
+      "barIndex": 50000,
+      "entryAtBarClose": true,
+      "stopDistance": 200,
+      "direction": "long",
+      "rMultiple": 2,
+      "maxBarsHeld": 2000
+    }
+  ]
+}

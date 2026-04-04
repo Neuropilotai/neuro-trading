@@ -1,0 +1,21 @@
+{
+  "dataGroup": "spy_5m_2022_2025",
+  "results": [
+    {
+      "setupId": "setup_001",
+      "expectancy": null,
+      "trades": 0,
+      "winRate": null,
+      "_stub": true,
+      "bootstrap_risk": null
+    },
+    {
+      "setupId": "setup_002",
+      "expectancy": null,
+      "trades": 0,
+      "winRate": null,
+      "_stub": true,
+      "bootstrap_risk": null
+    }
+  ]
+}

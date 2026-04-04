@@ -1,0 +1,17 @@
+{
+  "_comment": "TODO: replace with real feature extraction",
+  "symbol": "SPY",
+  "timeframe": "5m",
+  "dataGroup": "spy_5m_2022_2025",
+  "featureVectors": [],
+  "schema": [
+    "body_pct",
+    "range_pct",
+    "close_strength",
+    "trend_slope",
+    "distance_from_ma20",
+    "volatility_state",
+    "session_phase",
+    "regime"
+  ]
+}

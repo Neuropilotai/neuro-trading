@@ -1,0 +1,12 @@
+{
+  "_description": "Copy to $NEUROPILOT_DATA_ROOT/governance/correlation_prefilter_policy.json. Pre-correlation only; does not change promotion guard or scoring.",
+  "enabled": false,
+  "mode": "topk_diverse",
+  "maxSetups": 500,
+  "minTrades": 0,
+  "maxPerFamily": 50,
+  "preservePerFamily": 0,
+  "maxPerSymbolTimeframe": 100,
+  "preservePerSymbolTimeframe": 0,
+  "dedupeStructural": false
+}

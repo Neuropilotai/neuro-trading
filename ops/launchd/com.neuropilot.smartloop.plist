@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.neuropilot.smartloop</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>bash</string>
+      <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/ops/launchd/run-smartloop.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NEUROPILOT_DATA_ROOT</key>
+      <string>/Volumes/TradingDrive/NeuroPilotAI</string>
+      <key>NEUROPILOT_DATA_GUARD_SKIP</key>
+      <string>0</string>
+      <key>NEUROPILOT_ENV_FILE</key>
+      <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/.env</string>
+      <key>NEUROPILOT_META_PRE_CORR_MIN_TRADES</key>
+      <string>20</string>
+      <key>NEUROPILOT_META_PRE_CORR_MAX_PER_FAMILY</key>
+      <string>3</string>
+      <key>NEUROPILOT_META_PRE_CORR_MAX_TOTAL</key>
+      <string>1000</string>
+      <key>NEUROPILOT_SMART_LOOP_STALE_SEC</key>
+      <string>7200</string>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Seconds before launchd may respawn after exit; avoids hammering after crash (smart-loop runs are long). -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/smartloop.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/davidmikulis/neuro-pilot-ai/neuropilot_trading_v2/logs/smartloop.err.log</string>
+  </dict>
+</plist>
