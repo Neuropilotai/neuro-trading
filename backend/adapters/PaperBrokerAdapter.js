@@ -82,6 +82,9 @@ class PaperBrokerAdapter extends BrokerAdapter {
       currentValue: pos.currentValue,
       bookValue: pos.bookValue,
       marketValue: pos.marketValue,
+      priceSource: pos.priceSource,
+      markTimestamp: pos.markTimestamp,
+      priceLatency: pos.priceLatency,
       unrealizedPnL: pos.unrealizedPnL || 0
     }));
   }

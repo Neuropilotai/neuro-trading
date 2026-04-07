@@ -12,6 +12,7 @@ const bosATRFilter = require('../services/bosAtFilter');
 const championAllowlist = require('../services/championAllowlist');
 const championPerformance = require('../services/championPerformance');
 const paperTradingService = require('../services/paperTradingService');
+const priceFeedService = require('../services/priceFeedService');
 
 const MAX_NOTIONAL_PCT_PER_TRADE = parseFloat(process.env.MAX_NOTIONAL_PCT_PER_TRADE || '0.10');
 const MAX_NOTIONAL_PCT_PER_SYMBOL = parseFloat(process.env.MAX_NOTIONAL_PCT_PER_SYMBOL || '0.25');
@@ -20,13 +21,17 @@ const MIN_CASH_RESERVE_PCT = parseFloat(process.env.MIN_CASH_RESERVE_PCT || '0.2
 function getAccountExposureSnapshot() {
   const summary = paperTradingService.getAccountSummary();
 
-  const bookEquity = Number.isFinite(Number(summary.bookEquity))
-    ? Number(summary.bookEquity)
-    : Number.isFinite(Number(summary.totalValue))
-      ? Number(summary.totalValue)
-      : Number.isFinite(Number(summary.balance))
-        ? Number(summary.balance)
-        : 0;
+  let bookEquity = Number(summary.bookEquity);
+  if (!Number.isFinite(bookEquity)) {
+    const tb = Number(summary.totalBookValue);
+    const bal = Number(summary.balance);
+    bookEquity =
+      Number.isFinite(tb) && Number.isFinite(bal)
+        ? bal + tb
+        : Number.isFinite(Number(summary.balance))
+          ? Number(summary.balance)
+          : 0;
+  }
 
   const balance = Number.isFinite(Number(summary.balance)) ? Number(summary.balance) : 0;
 
@@ -117,6 +122,50 @@ function validateExposureLimits(orderIntent) {
       `Cash reserve violation: remaining $${remainingCash.toFixed(2)} < required reserve $${minCashReserve.toFixed(2)} (${(MIN_CASH_RESERVE_PCT * 100).toFixed(1)}% of equity)`
     );
   }
+}
+
+/**
+ * When live pricing is on, reject if webhook price diverges too much from fresh OANDA mid.
+ * If feed unavailable, warn and allow (failsafe).
+ */
+async function validateLivePriceVsWebhook(orderIntent) {
+  if (!priceFeedService.isLiveEnabled()) {
+    return { ok: true };
+  }
+  const maxDev = parseFloat(process.env.PRICE_MAX_DEVIATION_PCT || '0.02');
+  if (!Number.isFinite(maxDev) || maxDev <= 0) {
+    return { ok: true };
+  }
+
+  const web = Number(orderIntent.price);
+  const sym = String(orderIntent.symbol || '').trim();
+  if (!Number.isFinite(web) || web <= 0) {
+    return { ok: true };
+  }
+
+  const q = await priceFeedService.ensureFreshQuote(sym);
+  if (!q.price || !Number.isFinite(Number(q.price)) || Number(q.price) <= 0) {
+    console.warn(
+      `[PRICE_FEED] live mid unavailable for ${sym}; skipping deviation guard (failsafe)`
+    );
+    return { ok: true };
+  }
+
+  const liveMid = Number(q.price);
+  const dev = Math.abs(web - liveMid) / liveMid;
+  if (dev > maxDev) {
+    return {
+      ok: false,
+      reason: `Webhook price deviates ${(dev * 100).toFixed(2)}% from live mid ${liveMid.toFixed(
+        6
+      )} (max ${(maxDev * 100).toFixed(2)}%)`,
+    };
+  }
+
+  console.log(
+    `[PRICE_GUARD] symbol=${sym} deviation=${(dev * 100).toFixed(2)}% ok live=${liveMid}`
+  );
+  return { ok: true };
 }
 
 /** Hard bounds on webhook price per symbol (catches bad TV feeds / wrong placeholders). */
@@ -271,6 +320,16 @@ async function riskCheck(req, res, next) {
       });
     }
 
+    const livePriceGuard = await validateLivePriceVsWebhook(orderIntent);
+    if (!livePriceGuard.ok) {
+      console.warn(`🚫 Live price guard: ${livePriceGuard.reason}`);
+      return res.status(403).json({
+        error: 'Price deviation',
+        message: livePriceGuard.reason,
+        orderIntent,
+      });
+    }
+
     const validation = await riskEngine.validateOrder(orderIntent, accountBalance);
 
     if (!validation.allowed) {
@@ -339,6 +398,7 @@ module.exports = {
   riskCheck,
   extractOrderIntent,
   validateExposureLimits,
+  validateLivePriceVsWebhook,
   getAccountExposureSnapshot,
   getSymbolBookExposure,
 };

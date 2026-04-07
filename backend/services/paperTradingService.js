@@ -9,6 +9,7 @@ const EventEmitter = require('events');
 const tradeLedger = require('../db/tradeLedger');
 const riskEngine = require('./riskEngine');
 const tradingLearningService = require('./tradingLearningService');
+const priceFeedService = require('./priceFeedService');
 
 class PaperTradingService extends EventEmitter {
   constructor() {
@@ -57,6 +58,15 @@ class PaperTradingService extends EventEmitter {
     return Number.isFinite(Number(price)) ? Number(price) : null;
   }
 
+  /** Push persisted last prices into the global price feed (after load / rebuild). */
+  syncPriceFeedLastSeenFromAccount() {
+    const m = this.account.lastPriceBySymbol;
+    if (!m || typeof m.forEach !== 'function') return;
+    m.forEach((px, sym) => {
+      priceFeedService.updatePrice(sym, px);
+    });
+  }
+
   /**
    * Execute a paper trade order
    * @param {object} orderIntent - Validated order intent
@@ -78,6 +88,7 @@ class PaperTradingService extends EventEmitter {
 
     const { symbol, action, quantity, price, stopLoss, takeProfit } = orderIntent;
     this.updateLastPrice(symbol, price);
+    priceFeedService.updatePrice(symbol, price);
     const tradeId = `TRADE_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     try {
@@ -344,9 +355,26 @@ class PaperTradingService extends EventEmitter {
       const quantity = Number(pos.quantity) || 0;
       const avgPrice = Number(pos.avgPrice) || 0;
 
-      const lastPrice = this.getLastPrice(normalizedSymbol);
-      const effectiveLastPrice =
-        Number.isFinite(lastPrice) && lastPrice > 0 ? lastPrice : avgPrice;
+      const quote = priceFeedService.getQuoteSync(normalizedSymbol);
+      let effectiveLastPrice;
+      let priceSource;
+      let markTimestamp;
+      let priceLatency = quote.latencyMs ?? null;
+
+      if (
+        quote.price != null &&
+        Number.isFinite(Number(quote.price)) &&
+        Number(quote.price) > 0
+      ) {
+        effectiveLastPrice = Number(quote.price);
+        priceSource = quote.source;
+        markTimestamp = quote.markTimestamp;
+      } else {
+        effectiveLastPrice = avgPrice;
+        priceSource = 'fallback';
+        markTimestamp = null;
+        priceLatency = null;
+      }
 
       const bookValue = quantity * avgPrice;
       const marketValue = quantity * effectiveLastPrice;
@@ -357,6 +385,9 @@ class PaperTradingService extends EventEmitter {
         quantity,
         avgPrice,
         lastPrice: effectiveLastPrice,
+        priceSource,
+        markTimestamp,
+        priceLatency,
         currentValue: marketValue,
         bookValue,
         marketValue,
@@ -370,6 +401,16 @@ class PaperTradingService extends EventEmitter {
 
     const bookEquity = this.account.balance + totalBookValue;
     const equity = this.account.balance + totalMarketValue;
+
+    const { pricingMode, priceLatency } = priceFeedService.getAccountPricingMeta(
+      positions.map((p) => p.symbol)
+    );
+
+    if (String(process.env.PRICE_MTM_LOG || '').trim().toLowerCase() === 'true') {
+      console.log(
+        `[MTM] equity=${equity.toFixed(4)} unrealizedPnL=${totalUnrealizedPnL.toFixed(4)} mode=${pricingMode}`
+      );
+    }
 
     return {
       balance: this.account.balance,
@@ -385,6 +426,9 @@ class PaperTradingService extends EventEmitter {
       totalBookValue,
       totalMarketValue,
       totalUnrealizedPnL,
+
+      pricingMode,
+      priceLatency,
 
       openPositions: this.account.positions.size,
       positions,
@@ -545,6 +589,8 @@ class PaperTradingService extends EventEmitter {
       this.account.dailyPnL = 0; // Daily PnL resets daily, would need date filtering
       this.account.totalTrades = totalTrades; // Store count from ledger (source of truth)
 
+      this.syncPriceFeedLastSeenFromAccount();
+
       // Save rebuilt state
       await this.saveAccountState();
 
@@ -585,6 +631,8 @@ class PaperTradingService extends EventEmitter {
       } else {
         this.account.lastPriceBySymbol = new Map();
       }
+
+      this.syncPriceFeedLastSeenFromAccount();
 
       console.log(`✅ Loaded paper trading account state: $${this.account.balance.toFixed(2)}`);
     } catch (error) {

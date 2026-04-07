@@ -17,6 +17,7 @@
 const path = require('path');
 const riskEngine = require('./riskEngine');
 const paperTradingService = require('./paperTradingService');
+const priceFeedService = require('./priceFeedService');
 const { getBrokerAdapter } = require(path.join(__dirname, '../adapters/brokerAdapterFactory'));
 
 let emergencyStopActive = false;
@@ -138,6 +139,11 @@ async function executeOrderCore(orderIntent, options = {}) {
   }
 
   if (tm === 'paper') {
+    try {
+      await priceFeedService.ensureFreshQuote(orderIntent.symbol);
+    } catch (e) {
+      console.warn(`⚠️  priceFeed ensureFreshQuote: ${e?.message}`);
+    }
     const result = await paperTradingService.executeOrder(orderIntent);
     return {
       success: true,

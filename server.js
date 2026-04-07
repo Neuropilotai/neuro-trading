@@ -28,6 +28,7 @@ const deduplicationService = require('./backend/services/deduplicationService');
 const riskEngine = require('./backend/services/riskEngine');
 const tradeLedger = require('./backend/db/tradeLedger');
 const paperTradingService = require('./backend/services/paperTradingService'); // Keep for backward compatibility
+const priceFeedService = require('./backend/services/priceFeedService');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
@@ -1898,6 +1899,17 @@ function startServer() {
         console.log(`✅ Paper trading state initialized`);
     } catch (error) {
         console.error(`❌ Paper trading state initialization failed: ${error.message}`);
+    }
+
+    const priceRefreshMs = parseInt(process.env.PRICE_REFRESH_MS || '5000', 10);
+    if (Number.isFinite(priceRefreshMs) && priceRefreshMs >= 1000) {
+        priceFeedService.refreshWatchlist().catch(() => {});
+        setInterval(() => {
+            priceFeedService.refreshWatchlist().catch(() => {});
+        }, priceRefreshMs);
+        console.log(
+            `📈 Price feed refresh: every ${priceRefreshMs}ms (ENABLE_LIVE_PRICING=${process.env.ENABLE_LIVE_PRICING || 'false'})`
+        );
     }
     
     console.log(`📊 Paper Trading: ${process.env.ENABLE_PAPER_TRADING !== 'false' ? 'ENABLED' : 'DISABLED'}`);
