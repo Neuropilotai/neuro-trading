@@ -170,7 +170,7 @@ async function validateLivePriceVsWebhook(orderIntent) {
 
 /** Hard bounds on webhook price per symbol (catches bad TV feeds / wrong placeholders). */
 const PRICE_GUARDS_BY_SYMBOL = Object.freeze({
-  XAUUSD: { min: 1500, max: 3500 },
+  XAUUSD: { min: 3000, max: 7000 },
   BTCUSD: { min: 10000, max: 150000 },
   BTCUSDT: { min: 10000, max: 150000 },
   EURUSD: { min: 0.5, max: 2.0 },
