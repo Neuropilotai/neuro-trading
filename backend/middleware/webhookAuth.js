@@ -1,7 +1,9 @@
 /**
  * TradingView Webhook Authentication Middleware
- * Validates HMAC signature from TradingView alerts
- * 
+ *
+ * Primary (simple): JSON body field "secret" must equal TRADINGVIEW_WEBHOOK_SECRET (timing-safe).
+ * Optional: X-TradingView-Signature HMAC-SHA256 over raw body (TradingView “secret” header mode).
+ *
  * Feature Flag: ENABLE_WEBHOOK_AUTH (default: true)
  */
 
@@ -55,12 +57,8 @@ function verifySignature(payload, signature, secret) {
 
 /**
  * Webhook authentication middleware
- * Supports two authentication methods:
- * 1. HMAC signature header (X-TradingView-Signature)
- * 2. Body secret (JSON field "secret" matching TRADINGVIEW_WEBHOOK_SECRET)
- * 
- * Priority: Header auth is checked first, then body secret auth
- * Checks HMAC signature if ENABLE_WEBHOOK_AUTH is true
+ * 1. Body secret (JSON "secret" === env TRADINGVIEW_WEBHOOK_SECRET) — preferred for alert JSON
+ * 2. HMAC header X-TradingView-Signature (raw body)
  */
 async function webhookAuth(req, res, next) {
   // Check if auth is enabled (default: true)
@@ -81,7 +79,50 @@ async function webhookAuth(req, res, next) {
     });
   }
 
-  // Method 1: Check HMAC signature header (priority)
+  // Method 1: Body JSON "secret" (same value as TRADINGVIEW_WEBHOOK_SECRET)
+  if (req.body && typeof req.body === 'object' && Object.prototype.hasOwnProperty.call(req.body, 'secret')) {
+    const bodySecret = req.body.secret;
+    const expectedStr = String(secret);
+    const gotStr = bodySecret == null ? '' : String(bodySecret);
+
+    try {
+      const a = Buffer.from(gotStr, 'utf8');
+      const b = Buffer.from(expectedStr, 'utf8');
+      if (a.length !== b.length) {
+        throw new Error('length mismatch');
+      }
+      const isValid = crypto.timingSafeEqual(a, b);
+
+      if (isValid) {
+        console.log('✅ Webhook authenticated via body secret');
+        delete req.body.secret;
+        req.authModeUsed = 'body_secret';
+        return next();
+      }
+    } catch {
+      /* fall through to invalid */
+    }
+
+    console.warn(`⚠️  Invalid body secret from ${req.ip}`);
+    const tradingViewTelemetry = require('../services/tradingViewTelemetry');
+    try {
+      await tradingViewTelemetry.recordWebhook({
+        remoteIp: req.ip || req.connection?.remoteAddress,
+        userAgent: req.get('user-agent'),
+        authModeUsed: 'body_secret',
+        result: '401',
+        httpStatus: 401
+      });
+    } catch (telemetryError) {
+      console.warn('⚠️  Failed to record auth telemetry:', telemetryError.message);
+    }
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid secret'
+    });
+  }
+
+  // Method 2: HMAC signature header
   const signature = req.headers['x-tradingview-signature'] || 
                     req.headers['X-TradingView-Signature'];
 
@@ -144,58 +185,6 @@ async function webhookAuth(req, res, next) {
     }
   }
 
-  // Method 2: Check body secret (fallback if no header)
-  // Note: req.body is available because express.json() runs before this middleware
-  if (req.body && typeof req.body === 'object' && req.body.secret) {
-    const bodySecret = req.body.secret;
-    
-    // Use timing-safe comparison for secret
-    try {
-      const isValid = crypto.timingSafeEqual(
-        Buffer.from(bodySecret, 'utf8'),
-        Buffer.from(secret, 'utf8')
-      );
-      
-      if (isValid) {
-        // Body secret valid, proceed
-        console.log('✅ Webhook authenticated via body secret');
-        // Remove secret from body to prevent it from being logged/stored
-        delete req.body.secret;
-        // Record auth mode for telemetry
-        req.authModeUsed = 'body_secret';
-        return next();
-      } else {
-        // Body secret invalid
-        console.warn(`⚠️  Invalid body secret from ${req.ip}`);
-        // Record failed auth attempt (await to ensure it's recorded)
-        const tradingViewTelemetry = require('../services/tradingViewTelemetry');
-        try {
-          await tradingViewTelemetry.recordWebhook({
-            remoteIp: req.ip || req.connection?.remoteAddress,
-            userAgent: req.get('user-agent'),
-            authModeUsed: 'body_secret',
-            result: '401',
-            httpStatus: 401
-          });
-        } catch (telemetryError) {
-          // Log but don't block response if telemetry fails
-          console.warn('⚠️  Failed to record auth telemetry:', telemetryError.message);
-        }
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid secret'
-        });
-      }
-    } catch (error) {
-      // If comparison fails (e.g., different lengths), treat as invalid
-      console.warn(`⚠️  Body secret comparison failed: ${error.message}`);
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid secret'
-      });
-    }
-  }
-
   // No authentication method provided
   // Record failed auth attempt (await to ensure it's recorded)
   const tradingViewTelemetry = require('../services/tradingViewTelemetry');
@@ -214,7 +203,8 @@ async function webhookAuth(req, res, next) {
   
   return res.status(401).json({
     error: 'Unauthorized',
-    message: 'Missing authentication: Provide either X-TradingView-Signature header or "secret" field in request body'
+    message:
+      'Missing authentication: add JSON field "secret" with the same value as TRADINGVIEW_WEBHOOK_SECRET, or send X-TradingView-Signature'
   });
 }
 

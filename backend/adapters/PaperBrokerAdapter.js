@@ -80,6 +80,7 @@ class PaperBrokerAdapter extends BrokerAdapter {
       avgPrice: pos.avgPrice,
       currentPrice: pos.avgPrice, // Paper trading uses entry price as current
       currentValue: pos.currentValue,
+      bookValue: pos.bookValue,
       unrealizedPnL: pos.unrealizedPnL || 0
     }));
   }

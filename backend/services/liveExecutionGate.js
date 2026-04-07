@@ -51,12 +51,12 @@ function isTradingEnabled() {
 async function getCurrentEquity() {
   if (TRADING_MODE === 'paper' || TRADING_MODE === 'dry_run') {
     const summary = paperTradingService.getAccountSummary();
-    return summary.totalValue ?? summary.balance ?? parseFloat(process.env.ACCOUNT_BALANCE || '500');
+    return summary.bookEquity ?? summary.totalValue ?? summary.balance ?? parseFloat(process.env.ACCOUNT_BALANCE || '500');
   }
   try {
     const broker = getBrokerAdapter();
     const summary = await broker.getAccountSummary();
-    return summary.totalValue ?? summary.balance ?? 0;
+    return summary.bookEquity ?? summary.totalValue ?? summary.balance ?? 0;
   } catch (e) {
     console.warn('⚠️  liveExecutionGate.getCurrentEquity failed:', e?.message);
     return parseFloat(process.env.ACCOUNT_BALANCE || '500');

@@ -64,8 +64,11 @@ class PaperTradingService extends EventEmitter {
       
       if (action === 'BUY') {
         executionResult = await this.executeBuy(symbol, quantity, price, stopLoss, takeProfit, tradeId);
-      } else if (action === 'SELL' || action === 'CLOSE') {
+      } else if (action === 'SELL') {
         executionResult = await this.executeSell(symbol, quantity, price, tradeId, orderIntent);
+      } else if (action === 'CLOSE') {
+        executionResult = await this.executeClose(symbol, price, tradeId, orderIntent);
+        orderIntent.quantity = executionResult.filledQuantity;
       } else {
         throw new Error(`Invalid action: ${action}`);
       }
@@ -200,10 +203,28 @@ class PaperTradingService extends EventEmitter {
   }
 
   /**
-   * Execute a SELL/CLOSE order
+   * Close entire long position (ignores request quantity).
+   */
+  async executeClose(symbol, price, tradeId, orderIntent = null) {
+    const position = this.account.positions.get(symbol);
+
+    if (!position || position.quantity === 0) {
+      throw new Error(`No position in ${symbol} to close`);
+    }
+
+    const result = await this.executeSell(symbol, position.quantity, price, tradeId, orderIntent);
+    return { ...result, action: 'CLOSE' };
+  }
+
+  /**
+   * Reduce or close a long (reduce-only; no short).
    * @param {object} [orderIntent] - Optional, for riskDollars (champion performance tracker)
    */
   async executeSell(symbol, quantity, price, tradeId, orderIntent = null) {
+    if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) {
+      throw new Error(`Invalid SELL quantity: ${quantity}`);
+    }
+
     const position = this.account.positions.get(symbol);
 
     if (!position || position.quantity === 0) {
@@ -304,14 +325,18 @@ class PaperTradingService extends EventEmitter {
       initialBalance: this.account.initialBalance,
       totalPnL: this.account.totalPnL,
       dailyPnL: this.account.dailyPnL,
+      /** @deprecated Same as bookEquity — cost-based, not mark-to-market */
       totalValue: this.account.balance + totalPositionValue,
+      bookEquity: this.account.balance + totalPositionValue,
       openPositions: this.account.positions.size,
       positions: Array.from(this.account.positions.entries()).map(([symbol, pos]) => ({
         symbol,
         quantity: pos.quantity,
         avgPrice: pos.avgPrice,
+        /** @deprecated Same as bookValue — quantity × avgPrice, not live MTM */
         currentValue: pos.quantity * pos.avgPrice,
-        unrealizedPnL: 0 // Would need current price to calculate
+        bookValue: pos.quantity * pos.avgPrice,
+        unrealizedPnL: 0 // No live marking unless a market price feed is wired
       })),
       totalTrades: this.account.totalTrades, // Count from ledger (source of truth)
       enabled: this.enabled
