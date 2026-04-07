@@ -229,6 +229,8 @@ function extractOrderIntent(req) {
   }
 
   const setupId = body.setupId != null ? String(body.setupId) : (body.setup_id != null ? String(body.setup_id) : null);
+  const strategy = body.strategy != null ? String(body.strategy) : null;
+  const alert_id = body.alert_id != null ? String(body.alert_id) : null;
 
   return {
     symbol: body.symbol,
@@ -239,6 +241,8 @@ function extractOrderIntent(req) {
     takeProfit: takeProfit,
     confidence: body.confidence ? parseFloat(body.confidence) : null,
     setupId,
+    strategy,
+    alert_id,
     // Flags to indicate if values were defaults (allows indicator override)
     _stopLossWasDefault: stopLossWasDefault,
     _takeProfitWasDefault: takeProfitWasDefault

@@ -10,6 +10,7 @@ const tradeLedger = require('../db/tradeLedger');
 const riskEngine = require('./riskEngine');
 const tradingLearningService = require('./tradingLearningService');
 const priceFeedService = require('./priceFeedService');
+const closedTradeAnalyticsService = require('./closedTradeAnalyticsService');
 
 class PaperTradingService extends EventEmitter {
   constructor() {
@@ -199,13 +200,20 @@ class PaperTradingService extends EventEmitter {
       ? ((existingPosition.quantity * existingPosition.avgPrice) + cost) / newQuantity
       : price;
 
+    let tradeGroupId = existingPosition.tradeGroupId;
+    if (!existingPosition.quantity || existingPosition.quantity <= 0) {
+      tradeGroupId = `tg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    }
+
     // Update position
     this.account.positions.set(symbol, {
       quantity: newQuantity,
       avgPrice: newAvgPrice,
       entryTime: existingPosition.entryTime || new Date().toISOString(),
       stopLoss,
-      takeProfit
+      takeProfit,
+      tradeGroupId,
+      closeSequence: existingPosition.closeSequence || 0,
     });
 
     // Deduct from balance
@@ -277,6 +285,14 @@ class PaperTradingService extends EventEmitter {
       riskDollars = Math.abs(position.avgPrice - stop) * sellQuantity;
     }
 
+    const executedAt = new Date().toISOString();
+    const closeSequence = (position.closeSequence || 0) + 1;
+    const normSym = this.normalizeSymbol(symbol);
+    const entryTs =
+      position.entryTime && String(position.entryTime).length > 0
+        ? new Date(position.entryTime).toISOString()
+        : executedAt;
+
     // Update position
     const newQuantity = position.quantity - sellQuantity;
     if (newQuantity <= 0) {
@@ -284,7 +300,8 @@ class PaperTradingService extends EventEmitter {
     } else {
       this.account.positions.set(symbol, {
         ...position,
-        quantity: newQuantity
+        quantity: newQuantity,
+        closeSequence,
       });
     }
 
@@ -295,27 +312,57 @@ class PaperTradingService extends EventEmitter {
     this.account.dailyPnL += pnl;
     this.account.totalPnL += pnl;
 
-      // Create execution result
-      const executionResult = {
-        action: 'SELL',
-        symbol,
-        filledQuantity: sellQuantity,
-        fillPrice: price,
-        proceeds,
-        costBasis,
-        pnl,
-        riskDollars: riskDollars > 0 ? riskDollars : undefined,
-        position: newQuantity > 0 ? {
-          quantity: newQuantity,
-          avgPrice: position.avgPrice
-        } : null,
-        executedAt: new Date().toISOString()
-      };
+    const executionResult = {
+      action: 'SELL',
+      symbol,
+      filledQuantity: sellQuantity,
+      fillPrice: price,
+      proceeds,
+      costBasis,
+      pnl,
+      riskDollars: riskDollars > 0 ? riskDollars : undefined,
+      position:
+        newQuantity > 0
+          ? {
+              quantity: newQuantity,
+              avgPrice: position.avgPrice,
+            }
+          : null,
+      executedAt,
+    };
 
-      // Increment trade count (ledger is source of truth, this is just a counter)
-      this.account.totalTrades++;
+    try {
+      const quote = priceFeedService.getQuoteSync(normSym);
+      await closedTradeAnalyticsService.recordClosedTrade({
+        symbol: normSym,
+        entryPriceAvg: position.avgPrice,
+        exitPriceAvg: price,
+        closedQuantity: sellQuantity,
+        realizedPnL: pnl,
+        entryTimestamp: entryTs,
+        exitTimestamp: executedAt,
+        closeReason: orderIntent && orderIntent.action ? orderIntent.action : 'SELL',
+        actionSource:
+          orderIntent && orderIntent.actionSource ? orderIntent.actionSource : 'webhook',
+        strategy: orderIntent && orderIntent.strategy != null ? orderIntent.strategy : null,
+        setupId: orderIntent && orderIntent.setupId != null ? orderIntent.setupId : null,
+        alertId: orderIntent && orderIntent.alert_id != null ? orderIntent.alert_id : null,
+        priceSourceAtExit: quote.source,
+        fees: 0,
+        slippage: null,
+        stopLoss: orderIntent ? orderIntent.stopLoss : null,
+        tradeGroupId: position.tradeGroupId || null,
+        closeSequence,
+      });
+    } catch (err) {
+      console.warn(`[closed-trades] recordClosedTrade failed: ${err && err.message}`);
+    }
 
-      console.log(`✅ SELL executed: ${sellQuantity} ${symbol} @ $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
+    this.account.totalTrades++;
+
+    console.log(
+      `✅ SELL executed: ${sellQuantity} ${symbol} @ $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`
+    );
 
     return executionResult;
   }

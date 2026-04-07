@@ -29,6 +29,7 @@ const riskEngine = require('./backend/services/riskEngine');
 const tradeLedger = require('./backend/db/tradeLedger');
 const paperTradingService = require('./backend/services/paperTradingService'); // Keep for backward compatibility
 const priceFeedService = require('./backend/services/priceFeedService');
+const closedTradeAnalyticsService = require('./backend/services/closedTradeAnalyticsService');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
@@ -660,6 +661,57 @@ app.get('/api/account', async (req, res) => {
 app.get('/api/learning', (req, res) => {
     const learningMetrics = tradingLearningService.getMetrics();
     res.json(learningMetrics);
+});
+
+// Closed trade analytics (read-only JSONL journal)
+app.get('/api/closed-trades', async (req, res) => {
+    try {
+        const trades = await closedTradeAnalyticsService.listClosedTrades({
+            limit: req.query.limit,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            won: req.query.won,
+            from: req.query.from,
+            to: req.query.to,
+        });
+        res.json({
+            ok: true,
+            count: trades.length,
+            trades,
+        });
+    } catch (error) {
+        console.error('❌ /api/closed-trades:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/closed-trades/stats', async (req, res) => {
+    try {
+        const stats = await closedTradeAnalyticsService.getClosedTradeStatsFiltered({
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            won: req.query.won,
+            from: req.query.from,
+            to: req.query.to,
+        });
+        res.json({ ok: true, ...stats });
+    } catch (error) {
+        console.error('❌ /api/closed-trades/stats:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/closed-trades/recent', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '20', 10);
+        const trades = await closedTradeAnalyticsService.getRecentClosedTrades(
+            Number.isFinite(limit) && limit > 0 ? limit : 20
+        );
+        res.json({ ok: true, count: trades.length, trades });
+    } catch (error) {
+        console.error('❌ /api/closed-trades/recent:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
 });
 
 // ===== DEV-ONLY DEDUPE ENDPOINTS =====

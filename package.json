@@ -8,6 +8,7 @@
     "webhook": "node server.js",
     "lab:control": "node tools/labControlServer.js",
     "test:smoke": "node tests/smoke.js",
+    "test:closed-trades-analytics": "node tests/closedTradeAnalytics.test.js",
     "test:json-store-failfast": "node engine/governance/testJsonArtifactStoreFailFast.js",
     "test:cycle-p5-chain": "node engine/governance/testCycleP5Chain.js",
     "test:p5-metrics-smoke": "node engine/observability/smokeP5Metrics.js",
