@@ -20,6 +20,7 @@ class PaperTradingService extends EventEmitter {
       balance: parseFloat(process.env.ACCOUNT_BALANCE || '500'),
       initialBalance: parseFloat(process.env.ACCOUNT_BALANCE || '500'),
       positions: new Map(), // symbol -> {quantity, avgPrice, entryTime}
+      lastPriceBySymbol: new Map(), // symbol -> last seen market price (webhook / execution)
       dailyPnL: 0,
       totalPnL: 0,
       totalTrades: 0 // Count of executed trades (from ledger - source of truth)
@@ -34,6 +35,26 @@ class PaperTradingService extends EventEmitter {
 
     // Save account state periodically
     setInterval(() => this.saveAccountState(), 60000); // Every minute
+  }
+
+  normalizeSymbol(symbol) {
+    return String(symbol || '').toUpperCase().trim();
+  }
+
+  updateLastPrice(symbol, price) {
+    const normalized = this.normalizeSymbol(symbol);
+    const parsed = Number(price);
+
+    if (!normalized) return;
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+
+    this.account.lastPriceBySymbol.set(normalized, parsed);
+  }
+
+  getLastPrice(symbol) {
+    const normalized = this.normalizeSymbol(symbol);
+    const price = this.account.lastPriceBySymbol.get(normalized);
+    return Number.isFinite(Number(price)) ? Number(price) : null;
   }
 
   /**
@@ -56,6 +77,7 @@ class PaperTradingService extends EventEmitter {
     }
 
     const { symbol, action, quantity, price, stopLoss, takeProfit } = orderIntent;
+    this.updateLastPrice(symbol, price);
     const tradeId = `TRADE_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     try {
@@ -314,32 +336,60 @@ class PaperTradingService extends EventEmitter {
   }
 
   /**
-   * Get account summary
+   * Get account summary (book + mark-to-last-seen-price)
    */
   getAccountSummary() {
-    const totalPositionValue = Array.from(this.account.positions.values())
-      .reduce((sum, pos) => sum + (pos.quantity * pos.avgPrice), 0);
+    const positions = Array.from(this.account.positions.entries()).map(([symbol, pos]) => {
+      const normalizedSymbol = this.normalizeSymbol(symbol);
+      const quantity = Number(pos.quantity) || 0;
+      const avgPrice = Number(pos.avgPrice) || 0;
+
+      const lastPrice = this.getLastPrice(normalizedSymbol);
+      const effectiveLastPrice =
+        Number.isFinite(lastPrice) && lastPrice > 0 ? lastPrice : avgPrice;
+
+      const bookValue = quantity * avgPrice;
+      const marketValue = quantity * effectiveLastPrice;
+      const unrealizedPnL = marketValue - bookValue;
+
+      return {
+        symbol: normalizedSymbol,
+        quantity,
+        avgPrice,
+        lastPrice: effectiveLastPrice,
+        currentValue: marketValue,
+        bookValue,
+        marketValue,
+        unrealizedPnL,
+      };
+    });
+
+    const totalBookValue = positions.reduce((sum, pos) => sum + pos.bookValue, 0);
+    const totalMarketValue = positions.reduce((sum, pos) => sum + pos.marketValue, 0);
+    const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
+
+    const bookEquity = this.account.balance + totalBookValue;
+    const equity = this.account.balance + totalMarketValue;
 
     return {
       balance: this.account.balance,
       initialBalance: this.account.initialBalance,
       totalPnL: this.account.totalPnL,
       dailyPnL: this.account.dailyPnL,
-      /** @deprecated Same as bookEquity — cost-based, not mark-to-market */
-      totalValue: this.account.balance + totalPositionValue,
-      bookEquity: this.account.balance + totalPositionValue,
+
+      totalValue: equity,
+      currentEquity: equity,
+
+      bookEquity,
+      equity,
+      totalBookValue,
+      totalMarketValue,
+      totalUnrealizedPnL,
+
       openPositions: this.account.positions.size,
-      positions: Array.from(this.account.positions.entries()).map(([symbol, pos]) => ({
-        symbol,
-        quantity: pos.quantity,
-        avgPrice: pos.avgPrice,
-        /** @deprecated Same as bookValue — quantity × avgPrice, not live MTM */
-        currentValue: pos.quantity * pos.avgPrice,
-        bookValue: pos.quantity * pos.avgPrice,
-        unrealizedPnL: 0 // No live marking unless a market price feed is wired
-      })),
-      totalTrades: this.account.totalTrades, // Count from ledger (source of truth)
-      enabled: this.enabled
+      positions,
+      totalTrades: this.account.totalTrades,
+      enabled: this.enabled,
     };
   }
 
@@ -382,6 +432,7 @@ class PaperTradingService extends EventEmitter {
       balance: initialBalance,
       initialBalance: initialBalance,
       positions: new Map(),
+      lastPriceBySymbol: new Map(),
       dailyPnL: 0,
       totalPnL: 0,
       totalTrades: 0
@@ -411,6 +462,7 @@ class PaperTradingService extends EventEmitter {
       const initialBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
       let balance = initialBalance;
       const positions = new Map(); // symbol -> {quantity, avgPrice, entryTime, stopLoss, takeProfit}
+      const lastPriceBySymbol = new Map(); // symbol -> latest observed trade price
       let totalPnL = 0;
       let totalTrades = 0;
 
@@ -421,6 +473,9 @@ class PaperTradingService extends EventEmitter {
         const quantity = parseFloat(trade.quantity);
         const price = parseFloat(trade.price);
         const pnl = parseFloat(trade.pnl || 0);
+        if (symbol && Number.isFinite(Number(price)) && Number(price) > 0) {
+          lastPriceBySymbol.set(String(symbol).toUpperCase().trim(), Number(price));
+        }
 
         if (action === 'BUY') {
           // Get or create position
@@ -485,6 +540,7 @@ class PaperTradingService extends EventEmitter {
       this.account.balance = balance;
       this.account.initialBalance = initialBalance;
       this.account.positions = positions;
+      this.account.lastPriceBySymbol = lastPriceBySymbol;
       this.account.totalPnL = totalPnL;
       this.account.dailyPnL = 0; // Daily PnL resets daily, would need date filtering
       this.account.totalTrades = totalTrades; // Store count from ledger (source of truth)
@@ -524,6 +580,11 @@ class PaperTradingService extends EventEmitter {
       if (state.positions) {
         this.account.positions = new Map(Object.entries(state.positions));
       }
+      if (state.lastPriceBySymbol) {
+        this.account.lastPriceBySymbol = new Map(Object.entries(state.lastPriceBySymbol));
+      } else {
+        this.account.lastPriceBySymbol = new Map();
+      }
 
       console.log(`✅ Loaded paper trading account state: $${this.account.balance.toFixed(2)}`);
     } catch (error) {
@@ -551,6 +612,7 @@ class PaperTradingService extends EventEmitter {
         dailyPnL: this.account.dailyPnL,
         totalTrades: this.account.totalTrades || 0,
         positions: Object.fromEntries(this.account.positions),
+        lastPriceBySymbol: Object.fromEntries(this.account.lastPriceBySymbol || new Map()),
         lastUpdated: new Date().toISOString()
       };
 

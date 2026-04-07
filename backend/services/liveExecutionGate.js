@@ -49,14 +49,21 @@ function isTradingEnabled() {
  * Used by reconciliationService and kill-switch checks.
  */
 async function getCurrentEquity() {
-  if (TRADING_MODE === 'paper' || TRADING_MODE === 'dry_run') {
+  const mode = readTradingMode();
+  if (mode === 'paper' || mode === 'dry_run') {
     const summary = paperTradingService.getAccountSummary();
-    return summary.bookEquity ?? summary.totalValue ?? summary.balance ?? parseFloat(process.env.ACCOUNT_BALANCE || '500');
+    return (
+      summary.equity ??
+      summary.totalValue ??
+      summary.bookEquity ??
+      summary.balance ??
+      parseFloat(process.env.ACCOUNT_BALANCE || '500')
+    );
   }
   try {
     const broker = getBrokerAdapter();
     const summary = await broker.getAccountSummary();
-    return summary.bookEquity ?? summary.totalValue ?? summary.balance ?? 0;
+    return summary.equity ?? summary.totalValue ?? summary.bookEquity ?? summary.balance ?? 0;
   } catch (e) {
     console.warn('⚠️  liveExecutionGate.getCurrentEquity failed:', e?.message);
     return parseFloat(process.env.ACCOUNT_BALANCE || '500');

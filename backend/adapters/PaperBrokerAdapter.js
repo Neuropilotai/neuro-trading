@@ -78,9 +78,10 @@ class PaperBrokerAdapter extends BrokerAdapter {
       symbol: pos.symbol,
       quantity: pos.quantity,
       avgPrice: pos.avgPrice,
-      currentPrice: pos.avgPrice, // Paper trading uses entry price as current
+      currentPrice: pos.lastPrice ?? pos.avgPrice,
       currentValue: pos.currentValue,
       bookValue: pos.bookValue,
+      marketValue: pos.marketValue,
       unrealizedPnL: pos.unrealizedPnL || 0
     }));
   }
@@ -92,7 +93,7 @@ class PaperBrokerAdapter extends BrokerAdapter {
     const summary = paperTradingService.getAccountSummary();
     return {
       balance: summary.balance,
-      equity: summary.totalValue,
+      equity: summary.equity ?? summary.bookEquity ?? summary.totalValue,
       margin: 0, // Paper trading has no margin
       marginUsed: 0,
       marginAvailable: summary.balance,
