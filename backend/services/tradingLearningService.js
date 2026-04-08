@@ -6,7 +6,9 @@
  * Replace with full implementation when adding learning pipeline to v2.
  */
 
-const enabled = false;
+const enabled = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.ENABLE_TRADING_LEARNING || '').trim().toLowerCase()
+);
 
 async function learnFromTrade(executionResult, orderIntent) {
   // no-op

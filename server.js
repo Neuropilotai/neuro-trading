@@ -45,7 +45,7 @@ const tradingLearningService = require('./backend/services/tradingLearningServic
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
 const patternLearningEngine = require('./backend/services/patternLearningEngine');
-const learningDaemon = require('./backend/services/learningDaemon');
+const { LearningDaemon } = require('./backend/services/learningDaemon');
 const indicatorGenerator = require('./backend/services/indicatorGenerator');
 const dailyPatternTracker = require('./backend/services/dailyPatternTracker');
 const automatedScalpingTrader = require('./backend/services/automatedScalpingTrader');
@@ -1819,7 +1819,7 @@ app.post('/api/patterns/sync', async (req, res) => {
 // Learning health check
 app.get('/learn/health', async (req, res) => {
     try {
-        const daemon = new learningDaemon();
+        const daemon = new LearningDaemon();
         const status = daemon.getStatus();
         const engineStats = patternLearningEngine.getStats();
         
@@ -1856,8 +1856,8 @@ app.get('/learn/status', async (req, res) => {
     try {
         const fs = require('fs').promises;
         const path = require('path');
-        const daemon = new learningDaemon();
-        const status = await daemon.getStatus(); // Now async
+        const daemon = new LearningDaemon();
+        const status = await daemon.getStatus();
         const engineStats = patternLearningEngine.getStats();
         const googleDriveStorage = require('./backend/services/googleDrivePatternStorage');
         const universeLoader = require('./backend/services/universeLoader');
