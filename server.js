@@ -361,6 +361,8 @@ app.post('/webhook/tradingview',
                 // Trade already logged with status='ALERT_ONLY' in ledger
                 // No execution result needed (will be handled in response)
             } else if (req.liveExecutionGate?.executeOrder) {
+                // Same trade_id as SQLite ledger row — paperTradingService must not mint a second id
+                orderIntent.ledgerTradeId = tradeId;
                 // Route through liveExecutionGate (paper/dry_run/live)
                 const gateResult = await req.liveExecutionGate.executeOrder(orderIntent, { accountBalance });
                 if (!gateResult.success) {

@@ -6,6 +6,7 @@
  */
 
 const EventEmitter = require('events');
+const path = require('path');
 const tradeLedger = require('../db/tradeLedger');
 const riskEngine = require('./riskEngine');
 const tradingLearningService = require('./tradingLearningService');
@@ -40,6 +41,12 @@ class PaperTradingService extends EventEmitter {
     setInterval(() => this.saveAccountState(), 60000); // Every minute
   }
 
+  /** Durable path: DATA_DIR (Railway volume) or cwd/data — matches webhook_logs layout. */
+  getPaperStateFilePath() {
+    const base = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    return path.join(base, 'paper_trading_state.json');
+  }
+
   normalizeSymbol(symbol) {
     return String(symbol || '').toUpperCase().trim();
   }
@@ -58,6 +65,65 @@ class PaperTradingService extends EventEmitter {
     const normalized = this.normalizeSymbol(symbol);
     const price = this.account.lastPriceBySymbol.get(normalized);
     return Number.isFinite(Number(price)) ? Number(price) : null;
+  }
+
+  /**
+   * Use the same trade_id as the immutable ledger row when provided (webhook pre-insert),
+   * otherwise generate one. Keeps updateTradeStatus / rebuild aligned with SQLite.
+   */
+  resolvePaperTradeId(orderIntent) {
+    const ext =
+      orderIntent &&
+      (orderIntent.ledgerTradeId || orderIntent.tradeId || orderIntent.trade_id);
+    if (ext != null && String(ext).trim() !== '') {
+      return String(ext).trim();
+    }
+    return `TRADE_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  }
+
+  /**
+   * Ensure a trades row exists before execution so updateTradeLedger is not a no-op.
+   * Webhook path: row already inserted — skip. Autonomous / internal: insert PENDING.
+   */
+  async ensurePaperLedgerRow(tradeId, orderIntent) {
+    if (!tradeLedger.enabled) {
+      return;
+    }
+    await tradeLedger.initialize();
+    const existing = await tradeLedger.getTrade(tradeId);
+    if (existing) {
+      return;
+    }
+    try {
+      await tradeLedger.insertTrade({
+        trade_id: tradeId,
+        idempotency_key: `paper_exec_${tradeId}`,
+        symbol: orderIntent.symbol,
+        action: orderIntent.action,
+        quantity: orderIntent.quantity,
+        price: orderIntent.price,
+        stop_loss: orderIntent.stopLoss,
+        take_profit: orderIntent.takeProfit,
+        confidence: orderIntent.confidence,
+        account_balance: null,
+        status: 'PENDING',
+        metadata: {
+          source: orderIntent.actionSource || 'paper_trading',
+          autonomousTag: orderIntent.autonomousTag === true,
+        },
+      });
+      console.log(
+        `[paper] ledger row created trade_id=${tradeId} action=${orderIntent.action} symbol=${orderIntent.symbol}`
+      );
+    } catch (err) {
+      const msg = err && err.message ? String(err.message) : '';
+      if (msg.includes('Duplicate') || msg.includes('UNIQUE')) {
+        console.log(`[paper] ledger row already present trade_id=${tradeId} (concurrent insert)`);
+        return;
+      }
+      console.error(`[paper] ledger insert failed trade_id=${tradeId}:`, msg);
+      throw err;
+    }
   }
 
   /** Push persisted last prices into the global price feed (after load / rebuild). */
@@ -91,7 +157,8 @@ class PaperTradingService extends EventEmitter {
     const { symbol, action, quantity, price, stopLoss, takeProfit } = orderIntent;
     this.updateLastPrice(symbol, price);
     priceFeedService.updatePrice(symbol, price);
-    const tradeId = `TRADE_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const tradeId = this.resolvePaperTradeId(orderIntent);
+    await this.ensurePaperLedgerRow(tradeId, orderIntent);
 
     try {
       // Execute based on action
@@ -179,6 +246,11 @@ class PaperTradingService extends EventEmitter {
         console.warn(`[shadow-allocation] ${e && e.message}`);
       }
 
+      await this.saveAccountState();
+      console.log(
+        `[paper] state persisted trade_id=${tradeId} action=${action} symbol=${symbol}`
+      );
+
       return {
         success: true,
         tradeId,
@@ -189,9 +261,19 @@ class PaperTradingService extends EventEmitter {
       console.error(`❌ Paper trade execution error: ${error.message}`);
       
       // Update trade ledger with rejection
-      await tradeLedger.updateTradeStatus(tradeId, 'REJECTED', {
-        rejection_reason: error.message
-      });
+      try {
+        await tradeLedger.initialize();
+        const rejChanges = await tradeLedger.updateTradeStatus(tradeId, 'REJECTED', {
+          rejection_reason: error.message
+        });
+        if (rejChanges !== null && rejChanges < 1) {
+          console.error(
+            `[paper] LEDGER INVARIANT: updateTradeStatus REJECTED affected 0 rows trade_id=${tradeId}`
+          );
+        }
+      } catch (ledgerErr) {
+        console.warn(`[paper] ledger REJECTED update skipped: ${ledgerErr && ledgerErr.message}`);
+      }
 
       throw error;
     }
@@ -619,20 +701,40 @@ class PaperTradingService extends EventEmitter {
       await tradeLedger.initialize();
       
       // Update status to EXECUTED
-      await tradeLedger.updateTradeStatus(tradeId, 'EXECUTED', {
+      const executedChanges = await tradeLedger.updateTradeStatus(tradeId, 'EXECUTED', {
         executed_at: executionResult.executedAt,
         pnl: executionResult.pnl || 0
       });
+      if (executedChanges !== null && executedChanges < 1) {
+        console.error(
+          `[paper] LEDGER INVARIANT: updateTradeStatus EXECUTED affected 0 rows (expected 1) trade_id=${tradeId}`
+        );
+      }
 
       // Update to FILLED if order was fully executed
       if (executionResult.filledQuantity === orderIntent.quantity) {
-        await tradeLedger.updateTradeStatus(tradeId, 'FILLED', {
+        const filledChanges = await tradeLedger.updateTradeStatus(tradeId, 'FILLED', {
           filled_at: executionResult.executedAt,
           pnl: executionResult.pnl || 0
         });
+        if (filledChanges !== null && filledChanges < 1) {
+          console.error(
+            `[paper] LEDGER INVARIANT: updateTradeStatus FILLED affected 0 rows (expected 1) trade_id=${tradeId}`
+          );
+        }
+        console.log(`[paper] ledger FILLED trade_id=${tradeId} pnl=${executionResult.pnl || 0}`);
       }
     } catch (error) {
       console.error('❌ Error updating trade ledger:', error);
+      console.error(
+        JSON.stringify({
+          event: 'paper_ledger_update_failed_after_fill',
+          trade_id: tradeId,
+          symbol: orderIntent && orderIntent.symbol,
+          action: orderIntent && orderIntent.action,
+          error: error && error.message ? String(error.message) : String(error),
+        })
+      );
       // Don't throw - ledger update failure shouldn't fail the trade
     }
   }
@@ -794,6 +896,7 @@ class PaperTradingService extends EventEmitter {
       console.warn('⚠️  DEV RESET ACTIVE: Resetting paper state to initial balance');
       this.resetToInitialState();
       await this.saveAccountState();
+      await this.emitPaperBootMetrics('reset_dev');
       return;
     }
 
@@ -802,7 +905,9 @@ class PaperTradingService extends EventEmitter {
       try {
         const rebuilt = await this.rebuildStateFromLedger();
         if (rebuilt) {
-          // Rebuild succeeded, state is now accurate
+          const src =
+            this._paperRebuildMode === 'empty_reset' ? 'ledger_empty_reset' : 'ledger';
+          await this.emitPaperBootMetrics(src);
           return;
         }
         // Rebuild failed (ledger unavailable), fall through to load from file
@@ -813,6 +918,8 @@ class PaperTradingService extends EventEmitter {
 
     // Fallback: load from file (existing behavior)
     await this.loadAccountState();
+    await this.warnIfLedgerStateMismatchAfterLoad();
+    await this.emitPaperBootMetrics('json');
   }
 
   /**
@@ -836,19 +943,36 @@ class PaperTradingService extends EventEmitter {
    * @returns {Promise<boolean>} - True if rebuild succeeded, false otherwise
    */
   async rebuildStateFromLedger() {
+    this._paperRebuildMode = 'unset';
     try {
       // Ensure ledger is initialized
       await tradeLedger.initialize();
       
       // Get all FILLED trades from ledger
       const filledTrades = await tradeLedger.getFilledTrades();
-      
+      const emptyLedgerResets = process.env.PAPER_REBUILD_EMPTY_LEDGER_RESETS === 'true';
+
       if (filledTrades.length === 0) {
-        console.log('🔁 Rebuilt paper state: no executed trades found (clean state)');
-        this.resetToInitialState();
-        await this.saveAccountState();
-        return true;
+        console.warn(
+          `[paper] rebuild: ledger FILLED count=0 (source=sqlite). emptyLedgerResets=${emptyLedgerResets}`
+        );
+        if (emptyLedgerResets) {
+          console.warn('[paper] rebuild: resetting paper state (PAPER_REBUILD_EMPTY_LEDGER_RESETS=true)');
+          this.resetToInitialState();
+          await this.saveAccountState();
+          this._paperRebuildMode = 'empty_reset';
+          return true;
+        }
+        console.warn(
+          '[paper] rebuild: skipping reset; falling back to paper_trading_state.json (avoids wiping in-memory-only history)'
+        );
+        this._paperRebuildMode = 'skipped_empty';
+        return false;
       }
+
+      console.log(
+        `[paper] rebuild: replaying ${filledTrades.length} FILLED trade(s) from ledger (source=sqlite)`
+      );
 
       // Start with initial balance
       const initialBalance = parseFloat(process.env.ACCOUNT_BALANCE || '500');
@@ -948,10 +1072,62 @@ class PaperTradingService extends EventEmitter {
       const positionCount = positions.size;
       console.log(`🔁 Rebuilt paper state from ledger: trades=${totalTrades} positions=${positionCount} cash=$${balance.toFixed(2)}`);
       
+      this._paperRebuildMode = 'replay';
       return true;
     } catch (error) {
       console.error('❌ Error rebuilding state from ledger:', error.message);
+      this._paperRebuildMode = 'error';
       return false;
+    }
+  }
+
+  /**
+   * One-line structured boot metrics for operators / log aggregation (grep: paper_boot).
+   * rebuild_source: ledger | json | reset_dev | ledger_empty_reset
+   */
+  async emitPaperBootMetrics(rebuildSource) {
+    let filledRowsCount = 0;
+    let mismatchDetected = false;
+    const openPositionsCount = this.account.positions ? this.account.positions.size : 0;
+    try {
+      if (tradeLedger.enabled) {
+        await tradeLedger.initialize();
+        const filled = await tradeLedger.getFilledTrades();
+        filledRowsCount = filled.length;
+        mismatchDetected = openPositionsCount > 0 && filledRowsCount === 0;
+      }
+    } catch (e) {
+      console.warn(`[paper_boot] ledger read failed: ${e.message}`);
+    }
+    const jsonOpenPositions = rebuildSource === 'json' ? openPositionsCount : 0;
+    const payload = {
+      event: 'paper_boot_metrics',
+      rebuild_source: rebuildSource,
+      filled_rows_count: filledRowsCount,
+      open_positions_count: openPositionsCount,
+      json_open_positions: jsonOpenPositions,
+      mismatch_detected: mismatchDetected,
+    };
+    console.log(`[paper_boot] ${JSON.stringify(payload)}`);
+  }
+
+  /**
+   * After loading durable JSON, warn if open positions exist but the ledger has no FILLED rows
+   * (typical sign of missing insert/update alignment or pre-fix autonomous trades).
+   */
+  async warnIfLedgerStateMismatchAfterLoad() {
+    try {
+      if (!tradeLedger.enabled) return;
+      await tradeLedger.initialize();
+      const filled = await tradeLedger.getFilledTrades();
+      const openCount = this.account.positions ? this.account.positions.size : 0;
+      if (openCount > 0 && filled.length === 0) {
+        console.warn(
+          `[paper] RECONCILE WARNING: ${openCount} open position(s) in loaded state but ledger has 0 FILLED rows (entries may be missing from ledger)`
+        );
+      }
+    } catch (e) {
+      console.warn(`[paper] ledger/file reconcile check skipped: ${e.message}`);
     }
   }
 
@@ -960,8 +1136,7 @@ class PaperTradingService extends EventEmitter {
    */
   async loadAccountState() {
     const fs = require('fs').promises;
-    const path = require('path');
-    const stateFile = path.join(process.cwd(), 'data', 'paper_trading_state.json');
+    const stateFile = this.getPaperStateFilePath();
 
     try {
       const data = await fs.readFile(stateFile, 'utf8');
@@ -999,8 +1174,7 @@ class PaperTradingService extends EventEmitter {
    */
   async saveAccountState() {
     const fs = require('fs').promises;
-    const path = require('path');
-    const stateFile = path.join(process.cwd(), 'data', 'paper_trading_state.json');
+    const stateFile = this.getPaperStateFilePath();
     const tempFile = `${stateFile}.tmp`;
 
     try {

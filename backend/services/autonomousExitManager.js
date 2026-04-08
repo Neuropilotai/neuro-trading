@@ -124,11 +124,24 @@ async function runAutonomousExitCycle(options = {}) {
       if (String(gate.getTradingMode ? gate.getTradingMode() : 'paper').toLowerCase() !== 'paper') {
         exitResult = { success: false, reason: 'autonomous_exit_paper_only' };
       } else {
+        console.log(
+          `[autonomous-exit] submit CLOSE symbol=${orderIntent.symbol} qty=${orderIntent.quantity} px=${orderIntent.price} reasons=${(evalResult.reasons || []).join(',')}`
+        );
         exitResult = await gate.executeOrder(orderIntent, {
           accountBalance: Number(summary.equity) || Number(summary.balance) || 0,
         });
+        if (exitResult && exitResult.success) {
+          console.log(
+            `[autonomous-exit] filled trade_id=${exitResult.tradeId || '?'} symbol=${orderIntent.symbol}`
+          );
+        } else {
+          console.warn(
+            `[autonomous-exit] not filled symbol=${orderIntent.symbol} reason=${exitResult && exitResult.reason}`
+          );
+        }
       }
     } catch (e) {
+      console.warn(`[autonomous-exit] error symbol=${orderIntent.symbol}: ${e.message}`);
       exitResult = { success: false, reason: e.message };
     }
     records.push({
