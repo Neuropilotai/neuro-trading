@@ -6,6 +6,7 @@
  */
 
 const closedTradeAnalyticsService = require('./closedTradeAnalyticsService');
+const executionQualityService = require('./executionQualityService');
 
 function round6(x) {
   return Math.round(Number(x) * 1e6) / 1e6;
@@ -432,6 +433,15 @@ async function getAnalyticsOverview(options = {}) {
     trades = [];
   }
 
+  let executionRealism = null;
+  try {
+    executionRealism = await executionQualityService.getExecutionQualitySummary({
+      limit: parseInt(options.limit, 10) || 200,
+    });
+  } catch (e) {
+    executionRealism = null;
+  }
+
   const portfolio = buildPortfolioOverview();
   const executionQuality = buildExecutionQualitySummary(trades);
   const strategyAttribution = buildAttributionSummary(trades, ['strategy']);
@@ -462,6 +472,7 @@ async function getAnalyticsOverview(options = {}) {
     generatedAt,
     portfolio,
     executionQuality,
+    executionRealism,
     strategyAttribution,
     symbolAttribution,
     hourAttribution,

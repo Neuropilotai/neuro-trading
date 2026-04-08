@@ -11,6 +11,7 @@ const riskEngine = require('./riskEngine');
 const tradingLearningService = require('./tradingLearningService');
 const priceFeedService = require('./priceFeedService');
 const closedTradeAnalyticsService = require('./closedTradeAnalyticsService');
+const executionRealismService = require('./executionRealismService');
 
 class PaperTradingService extends EventEmitter {
   constructor() {
@@ -97,7 +98,15 @@ class PaperTradingService extends EventEmitter {
       let executionResult;
       
       if (action === 'BUY') {
-        executionResult = await this.executeBuy(symbol, quantity, price, stopLoss, takeProfit, tradeId);
+        executionResult = await this.executeBuy(
+          symbol,
+          quantity,
+          price,
+          stopLoss,
+          takeProfit,
+          tradeId,
+          orderIntent
+        );
       } else if (action === 'SELL') {
         executionResult = await this.executeSell(symbol, quantity, price, tradeId, orderIntent);
       } else if (action === 'CLOSE') {
@@ -191,8 +200,15 @@ class PaperTradingService extends EventEmitter {
   /**
    * Execute a BUY order
    */
-  async executeBuy(symbol, quantity, price, stopLoss, takeProfit, tradeId) {
-    const cost = quantity * price;
+  async executeBuy(symbol, quantity, price, stopLoss, takeProfit, tradeId, orderIntent = null) {
+    const refPx = Number(price);
+    const ctx = executionRealismService.buildPaperExecutionContext(
+      orderIntent || { symbol, action: 'BUY', quantity, price },
+      {}
+    );
+    const fill = executionRealismService.computeRealisticPaperFill(ctx);
+    const effPx = Number(fill.effectiveFillPrice);
+    const cost = quantity * effPx;
 
     // Check if we have enough balance
     if (cost > this.account.balance) {
@@ -203,29 +219,77 @@ class PaperTradingService extends EventEmitter {
     const existingPosition = this.account.positions.get(symbol) || {
       quantity: 0,
       avgPrice: 0,
-      entryTime: null
+      referenceAvgPrice: 0,
+      entryTime: null,
+      entryFriction: { spread: 0, slippage: 0, fee: 0, impact: 0 },
+      accumulatedEntryExecutionCost: 0,
     };
 
-    // Calculate new average price
+    const est = fill.executionDiagnostics && fill.executionDiagnostics.costEstimate;
+    const fr = est
+      ? {
+          spread: Number(est.spreadCost) || 0,
+          slippage: Number(est.slippageCost) || 0,
+          fee: Number(est.feeCost) || 0,
+          impact: Number(est.impactCost) || 0,
+        }
+      : { spread: 0, slippage: 0, fee: 0, impact: 0 };
+
+    // Calculate new average price (executed) and reference average
     const newQuantity = existingPosition.quantity + quantity;
-    const newAvgPrice = existingPosition.quantity > 0
-      ? ((existingPosition.quantity * existingPosition.avgPrice) + cost) / newQuantity
-      : price;
+    const newAvgPrice =
+      existingPosition.quantity > 0
+        ? (existingPosition.quantity * existingPosition.avgPrice + quantity * effPx) / newQuantity
+        : effPx;
+    const newRefAvg =
+      existingPosition.quantity > 0
+        ? (existingPosition.quantity * (existingPosition.referenceAvgPrice || existingPosition.avgPrice) +
+            quantity * refPx) /
+          newQuantity
+        : refPx;
 
     let tradeGroupId = existingPosition.tradeGroupId;
     if (!existingPosition.quantity || existingPosition.quantity <= 0) {
       tradeGroupId = `tg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     }
 
+    const prevFr = existingPosition.entryFriction || {
+      spread: 0,
+      slippage: 0,
+      fee: 0,
+      impact: 0,
+    };
+    const mergedFriction = {
+      spread: prevFr.spread + fr.spread,
+      slippage: prevFr.slippage + fr.slippage,
+      fee: prevFr.fee + fr.fee,
+      impact: prevFr.impact + fr.impact,
+    };
+    const legEntryCost =
+      (fr.spread || 0) + (fr.slippage || 0) + (fr.fee || 0) + (fr.impact || 0);
+
     // Update position
     this.account.positions.set(symbol, {
       quantity: newQuantity,
       avgPrice: newAvgPrice,
+      referenceAvgPrice: newRefAvg,
       entryTime: existingPosition.entryTime || new Date().toISOString(),
       stopLoss,
       takeProfit,
       tradeGroupId,
       closeSequence: existingPosition.closeSequence || 0,
+      entryFriction: mergedFriction,
+      accumulatedEntryExecutionCost:
+        (existingPosition.accumulatedEntryExecutionCost || 0) + legEntryCost,
+      sessionTagAtEntry:
+        existingPosition.sessionTagAtEntry != null
+          ? existingPosition.sessionTagAtEntry
+          : orderIntent &&
+              orderIntent.metadata &&
+              typeof orderIntent.metadata === 'object' &&
+              orderIntent.metadata.sessionTag != null
+            ? String(orderIntent.metadata.sessionTag)
+            : null,
       autonomousTag:
         orderIntent && (orderIntent.autonomousTag === true || orderIntent.actionSource === 'autonomous_entry_engine'),
       autonomousStrategy:
@@ -249,7 +313,7 @@ class PaperTradingService extends EventEmitter {
       tradeLifecycleService.notifyBuyFilled({
         tradeGroupId,
         symbol: this.normalizeSymbol(symbol),
-        fillPrice: price,
+        fillPrice: effPx,
         avgPrice: newAvgPrice,
         quantity: newQuantity,
       });
@@ -265,7 +329,8 @@ class PaperTradingService extends EventEmitter {
         action: 'BUY',
         symbol,
         filledQuantity: quantity,
-        fillPrice: price,
+        fillPrice: effPx,
+        referencePrice: refPx,
         cost,
         position: {
           quantity: newQuantity,
@@ -273,13 +338,23 @@ class PaperTradingService extends EventEmitter {
         },
         stopLoss,
         takeProfit,
-        executedAt: new Date().toISOString()
+        executedAt: new Date().toISOString(),
+        executionRealism: {
+          referencePrice: fill.referencePrice,
+          effectiveFillPrice: fill.effectiveFillPrice,
+          totalCost: fill.totalCost,
+          totalBps: fill.totalBps,
+          fillQualityScore: fill.fillQualityScore,
+          costEstimate: est || null,
+        },
       };
 
       // Increment trade count (ledger is source of truth, this is just a counter)
       this.account.totalTrades++;
 
-      console.log(`✅ BUY executed: ${quantity} ${symbol} @ $${price.toFixed(2)} | Balance: $${this.account.balance.toFixed(2)}`);
+      console.log(
+        `✅ BUY executed: ${quantity} ${symbol} @ $${effPx.toFixed(4)} (ref $${refPx.toFixed(4)}) | Balance: $${this.account.balance.toFixed(2)}`
+      );
 
     return executionResult;
   }
@@ -315,9 +390,53 @@ class PaperTradingService extends EventEmitter {
 
     // Adjust quantity if trying to sell more than we have
     const sellQuantity = Math.min(quantity, position.quantity);
-    const proceeds = sellQuantity * price;
+    const qtyBefore = position.quantity;
+    const refExit = Number(price);
+    const sellOrder =
+      orderIntent && String(orderIntent.action || '').toUpperCase() === 'CLOSE'
+        ? { ...orderIntent, action: 'SELL', quantity: sellQuantity, price: refExit, symbol }
+        : orderIntent || { symbol, action: 'SELL', quantity: sellQuantity, price: refExit };
+    const sellCtx = executionRealismService.buildPaperExecutionContext(sellOrder, {
+      notional: refExit * sellQuantity,
+    });
+
+    const exitFill = executionRealismService.computeRealisticPaperFill(sellCtx);
+    const effExit = Number(exitFill.effectiveFillPrice);
+    const proceeds = sellQuantity * effExit;
     const costBasis = sellQuantity * position.avgPrice;
-    const pnl = proceeds - costBasis;
+    const netPnL = proceeds - costBasis;
+
+    const refAvg = Number(position.referenceAvgPrice != null ? position.referenceAvgPrice : position.avgPrice);
+    const grossPnL = (refExit - refAvg) * sellQuantity;
+    const totalExecutionCost = grossPnL - netPnL;
+
+    const portion = qtyBefore > 0 ? sellQuantity / qtyBefore : 1;
+    const frIn = position.entryFriction || { spread: 0, slippage: 0, fee: 0, impact: 0 };
+    const entrySpreadCost = portion * (frIn.spread || 0);
+    const entrySlippageCost = portion * (frIn.slippage || 0);
+    const entryFeeCost = portion * (frIn.fee || 0);
+    const entryImpactCost = portion * (frIn.impact || 0);
+    const exitEst = exitFill.executionDiagnostics && exitFill.executionDiagnostics.costEstimate;
+    const exitSpreadCost = exitEst ? Number(exitEst.spreadCost) || 0 : 0;
+    const exitSlippageCost = exitEst ? Number(exitEst.slippageCost) || 0 : 0;
+    const exitFeeCost = exitEst ? Number(exitEst.feeCost) || 0 : 0;
+    const exitImpactCost = exitEst ? Number(exitEst.impactCost) || 0 : 0;
+
+    const notionalMid = refExit * sellQuantity;
+    const sumSpread = entrySpreadCost + exitSpreadCost;
+    const sumSlip = entrySlippageCost + exitSlippageCost + entryImpactCost + exitImpactCost;
+    const sumFee = entryFeeCost + exitFeeCost;
+    const spreadCostBps = notionalMid > 0 ? (sumSpread / notionalMid) * 10000 : null;
+    const slippageCostBps = notionalMid > 0 ? (sumSlip / notionalMid) * 10000 : null;
+    const feeCostBps = notionalMid > 0 ? (sumFee / notionalMid) * 10000 : null;
+    const executionCostBps = notionalMid > 0 ? (Math.abs(totalExecutionCost) / notionalMid) * 10000 : null;
+
+    const costToGrossRatio =
+      Math.abs(grossPnL) > 1e-12 ? Math.abs(totalExecutionCost / grossPnL) : null;
+    const netEfficiency =
+      Math.abs(grossPnL) > 1e-12 ? netPnL / grossPnL : null;
+
+    const pnl = netPnL;
 
     // Risk in dollars for R-multiple (long: risk = (avgPrice - stopLoss) * qty)
     let riskDollars = 0;
@@ -342,7 +461,7 @@ class PaperTradingService extends EventEmitter {
       const { finalized } = tradeLifecycleService.notifySellFill({
         tradeGroupId: position.tradeGroupId,
         symbol: normSym,
-        exitPrice: price,
+        exitPrice: effExit,
         pnl,
         newOpenQuantity: newQuantity,
         exitTimestamp: executedAt,
@@ -356,10 +475,19 @@ class PaperTradingService extends EventEmitter {
     if (newQuantity <= 0) {
       this.account.positions.delete(symbol);
     } else {
+      const rem = newQuantity / qtyBefore;
       this.account.positions.set(symbol, {
         ...position,
         quantity: newQuantity,
         closeSequence,
+        entryFriction: {
+          spread: (frIn.spread || 0) * rem,
+          slippage: (frIn.slippage || 0) * rem,
+          fee: (frIn.fee || 0) * rem,
+          impact: (frIn.impact || 0) * rem,
+        },
+        accumulatedEntryExecutionCost: (position.accumulatedEntryExecutionCost || 0) * rem,
+        referenceAvgPrice: position.referenceAvgPrice,
       });
     }
 
@@ -374,10 +502,14 @@ class PaperTradingService extends EventEmitter {
       action: 'SELL',
       symbol,
       filledQuantity: sellQuantity,
-      fillPrice: price,
+      fillPrice: effExit,
+      referenceExitPrice: refExit,
       proceeds,
       costBasis,
       pnl,
+      grossPnL,
+      netPnL,
+      totalExecutionCost,
       riskDollars: riskDollars > 0 ? riskDollars : undefined,
       position:
         newQuantity > 0
@@ -387,6 +519,12 @@ class PaperTradingService extends EventEmitter {
             }
           : null,
       executedAt,
+      executionRealism: {
+        referenceExitPrice: exitFill.referencePrice,
+        effectiveExitPrice: exitFill.effectiveFillPrice,
+        fillQualityScore: exitFill.fillQualityScore,
+        totalBps: exitFill.totalBps,
+      },
     };
 
     try {
@@ -394,9 +532,34 @@ class PaperTradingService extends EventEmitter {
       const recorded = await closedTradeAnalyticsService.recordClosedTrade({
         symbol: normSym,
         entryPriceAvg: position.avgPrice,
-        exitPriceAvg: price,
+        exitPriceAvg: effExit,
+        referenceEntryPrice: refAvg,
+        executedEntryPrice: position.avgPrice,
+        referenceExitPrice: refExit,
+        executedExitPrice: effExit,
+        entryExecutionCost: entrySpreadCost + entrySlippageCost + entryFeeCost + entryImpactCost,
+        exitExecutionCost: exitSpreadCost + exitSlippageCost + exitFeeCost + exitImpactCost,
+        entrySpreadCost,
+        entrySlippageCost,
+        entryFeeCost,
+        entryImpactCost,
+        exitSpreadCost,
+        exitSlippageCost,
+        exitFeeCost,
+        exitImpactCost,
+        grossRealizedPnL: grossPnL,
+        netRealizedPnL: netPnL,
+        realizedPnL: netPnL,
+        totalExecutionCost,
+        costToGrossRatio,
+        executionCostBps,
+        netEfficiency,
+        spreadCostBps,
+        slippageCostBps,
+        feeCostBps,
+        fillQualityScore: exitFill.fillQualityScore,
+        sessionTagAtEntry: position.sessionTagAtEntry || null,
         closedQuantity: sellQuantity,
-        realizedPnL: pnl,
         entryTimestamp: entryTs,
         exitTimestamp: executedAt,
         closeReason: orderIntent && orderIntent.action ? orderIntent.action : 'SELL',
@@ -406,13 +569,18 @@ class PaperTradingService extends EventEmitter {
         setupId: orderIntent && orderIntent.setupId != null ? orderIntent.setupId : null,
         alertId: orderIntent && orderIntent.alert_id != null ? orderIntent.alert_id : null,
         priceSourceAtExit: quote.source,
-        fees: 0,
-        slippage: null,
+        fees: exitFeeCost + entryFeeCost,
+        slippage: entrySlippageCost + exitSlippageCost,
         stopLoss: orderIntent ? orderIntent.stopLoss : null,
         regime: orderIntent && orderIntent.regime != null ? orderIntent.regime : null,
         lifecycleSummary: lifecycleSummary || null,
         tradeGroupId: position.tradeGroupId || null,
         closeSequence,
+        execution_realism_penalty: totalExecutionCost > 0,
+        gross_net_divergence_high:
+          Math.abs(grossPnL) > 1e-9 && Math.sign(grossPnL) !== Math.sign(netPnL),
+        costs_eroding_edge: grossPnL > 0 && netPnL <= 0,
+        poor_fill_quality: exitFill.fillQualityScore < 40,
       });
       // RL + policy/allocation refresh (non-blocking); only if a row was actually persisted
       if (recorded != null) {
@@ -507,6 +675,10 @@ class PaperTradingService extends EventEmitter {
         symbol: normalizedSymbol,
         quantity,
         avgPrice,
+        referenceAvgPrice:
+          pos.referenceAvgPrice != null && Number.isFinite(Number(pos.referenceAvgPrice))
+            ? Number(pos.referenceAvgPrice)
+            : avgPrice,
         lastPrice: effectiveLastPrice,
         priceSource,
         markTimestamp,
@@ -675,9 +847,12 @@ class PaperTradingService extends EventEmitter {
           positions.set(symbol, {
             quantity: newQuantity,
             avgPrice: newAvgPrice,
+            referenceAvgPrice: newAvgPrice,
             entryTime: existingPosition.entryTime || trade.filled_at || trade.executed_at || trade.created_at,
             stopLoss: trade.stop_loss || null,
-            takeProfit: trade.take_profit || null
+            takeProfit: trade.take_profit || null,
+            entryFriction: { spread: 0, slippage: 0, fee: 0, impact: 0 },
+            accumulatedEntryExecutionCost: 0,
           });
 
           // Deduct from balance

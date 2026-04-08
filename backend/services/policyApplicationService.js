@@ -401,9 +401,14 @@ function applyPolicies(learningState, analyticsOverview, options = {}) {
 
   const overview = analyticsOverview || {};
   const risk = overview.riskDiagnostics || {};
+  const execRealism = overview.executionRealism || {};
+  const execWarnings = Array.isArray(execRealism.executionRealismWarnings)
+    ? execRealism.executionRealismWarnings
+    : [];
   const globalDegFlags = [
     ...(Array.isArray(overview.degradationFlags) ? overview.degradationFlags : []),
     ...(Array.isArray(risk.degradationFlags) ? risk.degradationFlags : []),
+    ...execWarnings.map((w) => `EXEC_${String(w)}`),
   ];
   const uniqueFlags = [...new Set(globalDegFlags)];
 
@@ -490,6 +495,14 @@ function applyPolicies(learningState, analyticsOverview, options = {}) {
   };
 
   const policyHealthScore = computePolicyHealthScore(entities, globalBlock);
+  const gap = Number(execRealism.grossVsNetPnLGap);
+  const netEdgeDegradation = Number.isFinite(gap) ? round4(gap) : null;
+  let costAdjustedPolicyHealthScore = policyHealthScore;
+  if (execWarnings.length) {
+    costAdjustedPolicyHealthScore = Math.round(
+      clamp(policyHealthScore - execWarnings.length * 4, 0, 100)
+    );
+  }
 
   return {
     generatedAt,
@@ -500,6 +513,8 @@ function applyPolicies(learningState, analyticsOverview, options = {}) {
       scoreCardCount: scoreCards.length,
       parsedEntityCount: entities.length,
       concentration: round4(concentration),
+      avgTotalExecutionCostBps: execRealism.avgTotalExecutionCostBps ?? null,
+      costAdjustedWinRate: execRealism.costAdjustedWinRate ?? null,
     },
     summary,
     topPromoted,
@@ -507,6 +522,9 @@ function applyPolicies(learningState, analyticsOverview, options = {}) {
     topSuspended,
     degradationFlags: uniqueFlags,
     policyHealthScore,
+    costAdjustedPolicyHealthScore,
+    executionRealismWarnings: execWarnings,
+    netEdgeDegradation,
   };
 }
 
@@ -559,6 +577,7 @@ async function buildPolicyState(options = {}) {
         degradationFlags: [],
         strategyAttribution: [],
         executionQuality: { tradeCount: 0 },
+        executionRealism: { tradeCount: 0, executionRealismWarnings: [] },
       };
     }
   }
@@ -585,6 +604,9 @@ async function getPolicyOverview() {
     topSuspended: state.topSuspended || [],
     degradationFlags: state.degradationFlags || [],
     policyHealthScore: state.policyHealthScore ?? null,
+    costAdjustedPolicyHealthScore: state.costAdjustedPolicyHealthScore ?? null,
+    executionRealismWarnings: state.executionRealismWarnings || [],
+    netEdgeDegradation: state.netEdgeDegradation ?? null,
     diagnostics: state.diagnostics || {},
     correlationOverlapSummary: state.correlationOverlapSummary || null,
     correlationOverlapWarnings: state.correlationOverlapWarnings || [],

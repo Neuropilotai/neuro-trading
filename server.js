@@ -67,6 +67,7 @@ const {
 } = require('./backend/services/webhookIntegration');
 const { isChampionAllowed } = require('./engine/champions/executionGate');
 const operatorOverviewService = require('./backend/services/operatorOverviewService');
+const executionQualityService = require('./backend/services/executionQualityService');
 
 const app = express();
 // Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
@@ -673,6 +674,57 @@ app.get('/api/operator/overview', async (req, res) => {
         res.json({ ok: true, ...data });
     } catch (error) {
         console.error('❌ /api/operator/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// Paper execution realism (read-only)
+app.get('/api/execution/overview', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit, 10) || 200;
+        const data = await executionQualityService.getExecutionQualitySummary({ limit });
+        res.json({ ok: true, ...data });
+    } catch (error) {
+        console.error('❌ /api/execution/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/execution/recent', async (req, res) => {
+    try {
+        const lim = Math.min(parseInt(req.query.limit, 10) || 40, 500);
+        const trades = await closedTradeAnalyticsService.listClosedTrades({ limit: String(lim) });
+        res.json({ ok: true, generatedAt: new Date().toISOString(), trades });
+    } catch (error) {
+        console.error('❌ /api/execution/recent:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/execution/worst-symbols', async (req, res) => {
+    try {
+        const s = await executionQualityService.getExecutionQualitySummary({ limit: req.query.limit });
+        res.json({
+            ok: true,
+            generatedAt: s.generatedAt,
+            worstExecutionSymbols: s.worstExecutionSymbols || [],
+        });
+    } catch (error) {
+        console.error('❌ /api/execution/worst-symbols:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/execution/worst-strategies', async (req, res) => {
+    try {
+        const s = await executionQualityService.getExecutionQualitySummary({ limit: req.query.limit });
+        res.json({
+            ok: true,
+            generatedAt: s.generatedAt,
+            worstExecutionStrategies: s.worstExecutionStrategies || [],
+        });
+    } catch (error) {
+        console.error('❌ /api/execution/worst-strategies:', error.message);
         res.status(500).json({ ok: false, error: error.message });
     }
 });

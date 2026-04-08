@@ -93,6 +93,17 @@ async function buildOperatorOverview() {
     return securityStatusService.buildSecurityStatus(process.env);
   });
 
+  await mark('execution', async () => {
+    const executionQualityService = require('./executionQualityService');
+    const summary = await executionQualityService.getExecutionQualitySummary({ limit: 200 });
+    try {
+      await executionQualityService.persistLatest(summary);
+    } catch (e) {
+      void e;
+    }
+    return summary;
+  });
+
   return { generatedAt, sections };
 }
 

@@ -291,6 +291,9 @@
           <div class="metric"><span class="k">Version</span><span class="v">${escapeHtml(String(pol && pol.policyVersion != null ? pol.policyVersion : '—'))}</span></div>
           <div class="metric"><span class="k">Generated</span><span class="v">${fmtIso(pol && pol.generatedAt)}</span></div>
           <div class="metric"><span class="k">Health score</span><span class="v">${fmtNum(pol && pol.policyHealthScore)}</span></div>
+          <div class="metric"><span class="k">Cost-adjusted health</span><span class="v">${fmtNum(pol && pol.costAdjustedPolicyHealthScore)}</span></div>
+          <div class="metric"><span class="k">Exec realism warnings</span><span class="v">${escapeHtml(JSON.stringify(pol && pol.executionRealismWarnings || []))}</span></div>
+          <div class="metric"><span class="k">Net edge gap (gross−net)</span><span class="v">${fmtNum(pol && pol.netEdgeDegradation)}</span></div>
           <div class="metric"><span class="k">Portfolio mode</span><span class="v">${escapeHtml(String(gp.portfolioRiskMode || '—'))}</span></div>
           <div class="metric"><span class="k">Stability flags</span><span class="v">${escapeHtml(JSON.stringify(pol && pol.stabilityFlags || []))}</span></div>
           <div class="metric"><span class="k">Top promoted</span><span class="v"><pre class="json" style="max-height:80px">${escapeHtml(JSON.stringify((pol && pol.topPromoted) || [], null, 2))}</pre></span></div>
@@ -321,6 +324,44 @@
           <pre class="json">${escapeHtml(JSON.stringify(learn || {}, null, 2))}</pre>
         </div>
       </div>
+    `;
+  }
+
+  function renderExecution() {
+    const el = $('sectionG');
+    const o = state.overview && state.overview.sections;
+    if (!el) return;
+    if (!o || !state.overview.ok) {
+      el.innerHTML = '<div class="hint">Loading…</div>';
+      return;
+    }
+    const ex = o.execution && o.execution.ok && o.execution.data;
+    if (!ex) {
+      el.innerHTML =
+        '<div class="hint">Execution realism unavailable (section failed soft). Enable closed-trade analytics.</div>';
+      return;
+    }
+    const ws = ex.executionRealismWarnings || [];
+    el.innerHTML = `
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Costs &amp; quality</h3>
+          <div class="metric"><span class="k">Trades used</span><span class="v">${fmtNum(ex.tradesUsed)}</span></div>
+          <div class="metric"><span class="k">Avg total exec cost (bps)</span><span class="v">${fmtNum(ex.avgTotalExecutionCostBps)}</span></div>
+          <div class="metric"><span class="k">Avg spread / slip / fee (bps)</span><span class="v">${fmtNum(ex.avgSpreadCostBps)} / ${fmtNum(ex.avgSlippageCostBps)} / ${fmtNum(ex.avgFeeCostBps)}</span></div>
+          <div class="metric"><span class="k">Gross vs net PnL gap</span><span class="v">${fmtNum(ex.grossVsNetPnLGap)}</span></div>
+          <div class="metric"><span class="k">Gross win % / net win %</span><span class="v">${fmtNum(ex.grossWinRate)} / ${fmtNum(ex.costAdjustedWinRate)}</span></div>
+          <div class="metric"><span class="k">Cost flips win→loss %</span><span class="v">${fmtNum(ex.percentTradesWhereCostsFlippedGrossWinToNetLoss)}</span></div>
+          <div class="metric"><span class="k">Poor fill %</span><span class="v">${fmtNum(ex.percentTradesWithPoorFillQuality)}</span></div>
+        </div>
+        <div class="card">
+          <h3>Warnings &amp; worst actors</h3>
+          <div class="metric"><span class="k">Flags</span><span class="v">${ws.length ? ws.map((w) => pill(w, 'warn')).join(' ') : pill('none', 'ok')}</span></div>
+          <pre class="json" style="max-height:120px">${escapeHtml(JSON.stringify(ex.worstExecutionSymbols || [], null, 2))}</pre>
+          <pre class="json" style="max-height:120px">${escapeHtml(JSON.stringify(ex.worstExecutionStrategies || [], null, 2))}</pre>
+        </div>
+      </div>
+      <p class="hint">Last trade diagnostics: see <code>/api/execution/recent</code> · Snapshot file <code>execution_quality_latest.json</code></p>
     `;
   }
 
@@ -546,6 +587,7 @@
     renderSystemOverview();
     renderAutonomous();
     renderGovernance();
+    renderExecution();
     renderPositions();
     renderSecurity();
     updateActionButtonsDisabled();

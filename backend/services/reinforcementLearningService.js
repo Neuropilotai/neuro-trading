@@ -91,7 +91,7 @@ function buildStateBuckets(trades) {
 
   for (const t of rows) {
     const keys = bucketKeysForTrade(t);
-    const pnl = Number(t.realizedPnL) || 0;
+    const pnl = Number(t.netRealizedPnL != null ? t.netRealizedPnL : t.realizedPnL) || 0;
     for (const k of keys) {
       if (!map.has(k)) map.set(k, emptyAcc());
       const acc = map.get(k);

@@ -9,6 +9,7 @@ const securityAuditService = require('./securityAuditService');
 const policyApplicationService = require('./policyApplicationService');
 const capitalAllocationService = require('./capitalAllocationService');
 const correlationOverlapService = require('./correlationOverlapService');
+const executionRealismService = require('./executionRealismService');
 
 function getDataDir() {
   return process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -81,6 +82,9 @@ function mapGovernanceReasonToCanonical(reason) {
     market_state_unavailable: 'market_state_unavailable',
     stale_quote: 'stale_quote',
     allocation_unavailable: 'allocation_unavailable',
+    expected_cost_too_high: 'expected_cost_too_high',
+    net_edge_below_floor: 'net_edge_below_floor',
+    poor_expected_fill_quality: 'poor_expected_fill_quality',
   };
   if (table[r]) return table[r];
   if (r.startsWith('policy_mode_')) return 'policy_restricted';
@@ -194,6 +198,48 @@ function overlapContextForCandidate(overlapState, candidate) {
     strategyCrowdingScore: st.crowdingScore || 0,
     crowdedCluster: crowded ? crowded.clusterKey : null,
     warnings: overlapState?.warnings || [],
+  };
+}
+
+function estimateAutonomousExecutionCosts(candidate, sizing, scored) {
+  const price = Number(candidate.entryReferencePrice);
+  const qty = Number(sizing.quantity);
+  if (!(price > 0 && qty > 0)) {
+    return {
+      expectedExecutionCostBps: null,
+      expectedExecutionCostDollars: null,
+      expectedNetEdgeScore: null,
+      fillQualityExpectation: null,
+      executionRealismReasons: ['invalid_price_or_qty'],
+    };
+  }
+  const strategy = strategyNameForCandidate(candidate);
+  const fakeIntent = {
+    symbol: String(candidate.symbol || '').toUpperCase(),
+    action: 'BUY',
+    quantity: qty,
+    price,
+    actionSource: 'autonomous_entry_engine',
+    strategy,
+    autonomousSetupType: candidate.setupType,
+    metadata: {
+      sessionTag: candidate.features?.sessionTag || null,
+    },
+  };
+  const ctx = executionRealismService.buildPaperExecutionContext(fakeIntent, {});
+  const fill = executionRealismService.computeRealisticPaperFill(ctx);
+  const sc = scored?.score;
+  const expectedNetEdgeScore =
+    sc != null && Number.isFinite(Number(sc))
+      ? round4(Number(sc) * (1 - Number(fill.totalBps) / 10000))
+      : null;
+  const est = fill.executionDiagnostics && fill.executionDiagnostics.costEstimate;
+  return {
+    expectedExecutionCostBps: fill.totalBps,
+    expectedExecutionCostDollars: fill.totalCost,
+    expectedNetEdgeScore,
+    fillQualityExpectation: fill.fillQualityScore,
+    executionRealismReasons: (est && est.reasons) || [],
   };
 }
 
@@ -402,6 +448,36 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
     reasons.unshift('allocation_unavailable');
   }
 
+  const execEst = estimateAutonomousExecutionCosts(candidate, sizing, scored);
+  if (governanceDecision === 'allow') {
+    const maxBps = parseFloat(process.env.AUTO_ENTRY_REJECT_EXPECTED_EXEC_COST_BPS || '999');
+    if (
+      execEst.expectedExecutionCostBps != null &&
+      Number.isFinite(maxBps) &&
+      execEst.expectedExecutionCostBps > maxBps
+    ) {
+      governanceDecision = 'reject';
+      reasons.push('expected_cost_too_high');
+    }
+    const minNetEdge = parseFloat(process.env.AUTO_ENTRY_MIN_EXPECTED_NET_EDGE_SCORE || '0');
+    if (
+      execEst.expectedNetEdgeScore != null &&
+      Number.isFinite(minNetEdge) &&
+      execEst.expectedNetEdgeScore < minNetEdge
+    ) {
+      governanceDecision = 'reject';
+      reasons.push('net_edge_below_floor');
+    }
+    if (
+      String(process.env.AUTO_ENTRY_REJECT_POOR_EXPECTED_FILL || 'false').toLowerCase() === 'true' &&
+      execEst.fillQualityExpectation != null &&
+      execEst.fillQualityExpectation < 25
+    ) {
+      governanceDecision = 'reject';
+      reasons.push('poor_expected_fill_quality');
+    }
+  }
+
   const finalDecision = governanceDecision === 'allow' ? 'allow' : 'reject';
   const finalReason = reasons[0] || 'allowed';
   const strategy = strategyNameForCandidate(candidate);
@@ -447,6 +523,11 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
     canonicalRejectionCodes: reasons.map((x) => mapGovernanceReasonToCanonical(x)),
     primaryCanonicalRejection: mapGovernanceReasonToCanonical(reasons[0]),
     orderIntent,
+    expectedExecutionCostBps: execEst.expectedExecutionCostBps,
+    expectedExecutionCostDollars: execEst.expectedExecutionCostDollars,
+    expectedNetEdgeScore: execEst.expectedNetEdgeScore,
+    fillQualityExpectation: execEst.fillQualityExpectation,
+    executionRealismReasons: execEst.executionRealismReasons,
   };
 }
 
@@ -625,6 +706,7 @@ module.exports = {
   computeSizing,
   buildOrderIntentFromCandidate,
   buildGovernanceDecision,
+  estimateAutonomousExecutionCosts,
   submitAutonomousPaperOrder,
   runAutonomousEntryCycle,
   getAutonomousRejections,

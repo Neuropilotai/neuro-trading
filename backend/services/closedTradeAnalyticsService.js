@@ -65,12 +65,43 @@ function buildClosedTradeRecord(input) {
     stopLoss = null,
     regime = null,
     lifecycleSummary = null,
+    referenceEntryPrice = null,
+    executedEntryPrice = null,
+    referenceExitPrice = null,
+    executedExitPrice = null,
+    entryExecutionCost = null,
+    exitExecutionCost = null,
+    entrySpreadCost = null,
+    entrySlippageCost = null,
+    entryFeeCost = null,
+    entryImpactCost = null,
+    exitSpreadCost = null,
+    exitSlippageCost = null,
+    exitFeeCost = null,
+    exitImpactCost = null,
+    grossRealizedPnL = null,
+    netRealizedPnL = null,
+    totalExecutionCost = null,
+    costToGrossRatio = null,
+    executionCostBps = null,
+    netEfficiency = null,
+    spreadCostBps = null,
+    slippageCostBps = null,
+    feeCostBps = null,
+    fillQualityScore = null,
+    sessionTagAtEntry = null,
+    execution_realism_penalty = null,
+    gross_net_divergence_high = null,
+    costs_eroding_edge = null,
+    poor_fill_quality = null,
   } = input;
 
   const entry = Number(entryPriceAvg);
   const exitPx = Number(exitPriceAvg);
   const qty = Number(closedQuantity);
   const pnl = Number(realizedPnL);
+  const netP = netRealizedPnL != null ? Number(netRealizedPnL) : pnl;
+  const grossP = grossRealizedPnL != null ? Number(grossRealizedPnL) : null;
 
   const realizedPnLPercent =
     entry > 0 && Number.isFinite(entry) ? ((exitPx - entry) / entry) * 100 : 0;
@@ -108,8 +139,74 @@ function buildClosedTradeRecord(input) {
     side,
     entryPriceAvg: entry,
     exitPriceAvg: exitPx,
+    referenceEntryPrice:
+      referenceEntryPrice != null && Number.isFinite(Number(referenceEntryPrice))
+        ? Number(referenceEntryPrice)
+        : null,
+    executedEntryPrice:
+      executedEntryPrice != null && Number.isFinite(Number(executedEntryPrice))
+        ? Number(executedEntryPrice)
+        : null,
+    referenceExitPrice:
+      referenceExitPrice != null && Number.isFinite(Number(referenceExitPrice))
+        ? Number(referenceExitPrice)
+        : null,
+    executedExitPrice:
+      executedExitPrice != null && Number.isFinite(Number(executedExitPrice))
+        ? Number(executedExitPrice)
+        : null,
+    entryExecutionCost:
+      entryExecutionCost != null && Number.isFinite(Number(entryExecutionCost))
+        ? Number(entryExecutionCost)
+        : null,
+    exitExecutionCost:
+      exitExecutionCost != null && Number.isFinite(Number(exitExecutionCost))
+        ? Number(exitExecutionCost)
+        : null,
+    entrySpreadCost:
+      entrySpreadCost != null && Number.isFinite(Number(entrySpreadCost)) ? Number(entrySpreadCost) : null,
+    entrySlippageCost:
+      entrySlippageCost != null && Number.isFinite(Number(entrySlippageCost))
+        ? Number(entrySlippageCost)
+        : null,
+    entryFeeCost:
+      entryFeeCost != null && Number.isFinite(Number(entryFeeCost)) ? Number(entryFeeCost) : null,
+    entryImpactCost:
+      entryImpactCost != null && Number.isFinite(Number(entryImpactCost)) ? Number(entryImpactCost) : null,
+    exitSpreadCost:
+      exitSpreadCost != null && Number.isFinite(Number(exitSpreadCost)) ? Number(exitSpreadCost) : null,
+    exitSlippageCost:
+      exitSlippageCost != null && Number.isFinite(Number(exitSlippageCost)) ? Number(exitSlippageCost) : null,
+    exitFeeCost:
+      exitFeeCost != null && Number.isFinite(Number(exitFeeCost)) ? Number(exitFeeCost) : null,
+    exitImpactCost:
+      exitImpactCost != null && Number.isFinite(Number(exitImpactCost)) ? Number(exitImpactCost) : null,
+    totalExecutionCost:
+      totalExecutionCost != null && Number.isFinite(Number(totalExecutionCost))
+        ? Number(totalExecutionCost)
+        : null,
+    costToGrossRatio:
+      costToGrossRatio != null && Number.isFinite(Number(costToGrossRatio)) ? Number(costToGrossRatio) : null,
+    executionCostBps:
+      executionCostBps != null && Number.isFinite(Number(executionCostBps)) ? Number(executionCostBps) : null,
+    netEfficiency:
+      netEfficiency != null && Number.isFinite(Number(netEfficiency)) ? Number(netEfficiency) : null,
+    spreadCostBps:
+      spreadCostBps != null && Number.isFinite(Number(spreadCostBps)) ? Number(spreadCostBps) : null,
+    slippageCostBps:
+      slippageCostBps != null && Number.isFinite(Number(slippageCostBps)) ? Number(slippageCostBps) : null,
+    feeCostBps: feeCostBps != null && Number.isFinite(Number(feeCostBps)) ? Number(feeCostBps) : null,
+    fillQualityScore:
+      fillQualityScore != null && Number.isFinite(Number(fillQualityScore)) ? Number(fillQualityScore) : null,
+    sessionTagAtEntry: sessionTagAtEntry != null ? String(sessionTagAtEntry) : null,
+    execution_realism_penalty: execution_realism_penalty === true,
+    gross_net_divergence_high: gross_net_divergence_high === true,
+    costs_eroding_edge: costs_eroding_edge === true,
+    poor_fill_quality: poor_fill_quality === true,
     closedQuantity: qty,
     realizedPnL: pnl,
+    netRealizedPnL: netP,
+    grossRealizedPnL: grossP != null && Number.isFinite(grossP) ? grossP : null,
     realizedPnLPercent,
     holdingTimeSec,
     holdingTimeMin,
@@ -127,7 +224,7 @@ function buildClosedTradeRecord(input) {
     fees: Number(fees) || 0,
     slippage: slippage === undefined ? null : slippage,
     rMultiple,
-    won: pnl > 0,
+    won: netP > 0,
     closedAtDate,
     closedAtHourUTC,
     tradeGroupId: tradeGroupId || null,

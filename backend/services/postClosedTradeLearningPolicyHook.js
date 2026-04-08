@@ -42,6 +42,14 @@ async function runLearningThenPolicy() {
     console.warn(`[closed-trade→policy] runPolicyCycle: ${e && e.message}`);
   }
 
+  try {
+    const executionQualityService = require('./executionQualityService');
+    const s = await executionQualityService.getExecutionQualitySummary({ limit: 200 });
+    await executionQualityService.persistLatest(s);
+  } catch (e) {
+    console.warn(`[closed-trade→execution-quality] ${e && e.message}`);
+  }
+
   console.log('[closed-trade→learning→policy] pipeline end');
 }
 
