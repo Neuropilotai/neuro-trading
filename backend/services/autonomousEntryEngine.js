@@ -8,7 +8,13 @@ const autonomousScoring = require('./autonomousCandidateScoringService');
 const autonomousCoordinator = require('./autonomousExecutionCoordinator');
 const autonomousExitManager = require('./autonomousExitManager');
 
-const AUTONOMOUS_ENTRY_ENGINE_VERSION = 1;
+const AUTONOMOUS_ENTRY_ENGINE_VERSION = 2;
+
+/** Minimum interval floors (seconds) — prevents tight loops if env misconfigured. */
+const MIN_SCAN_INTERVAL_SECONDS = 15;
+const MIN_EXIT_INTERVAL_SECONDS = 10;
+
+const WARNINGS_CAP = 48;
 
 function getDataDir() {
   return process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -31,16 +37,47 @@ function isEnabled() {
   return String(process.env.ENABLE_AUTONOMOUS_ENTRY_ENGINE || 'false').toLowerCase() === 'true';
 }
 
+function parseStaleQuoteMs() {
+  const n = parseInt(process.env.AUTO_ENTRY_STALE_QUOTE_MS || '90000', 10);
+  return Number.isFinite(n) && n > 5000 ? n : 90000;
+}
+
+function pushWarning(status, msg) {
+  if (!status.warnings) status.warnings = [];
+  status.warnings.push(`${new Date().toISOString()} ${msg}`);
+  if (status.warnings.length > WARNINGS_CAP) {
+    status.warnings.splice(0, status.warnings.length - WARNINGS_CAP);
+  }
+}
+
+function effectiveScanIntervalSeconds(base) {
+  return Math.max(MIN_SCAN_INTERVAL_SECONDS, Math.max(5, parseInt(base, 10) || 60));
+}
+
+function effectiveExitIntervalSeconds(base) {
+  return Math.max(MIN_EXIT_INTERVAL_SECONDS, Math.max(5, parseInt(base, 10) || 30));
+}
+
 class AutonomousEntryEngine {
   constructor() {
     this.version = AUTONOMOUS_ENTRY_ENGINE_VERSION;
     this.enabled = isEnabled();
     this.running = false;
     this.symbols = parseSymbols();
-    this.scanIntervalSeconds = parseInt(process.env.AUTO_ENTRY_SCAN_INTERVAL_SECONDS || '60', 10);
-    this.exitIntervalSeconds = parseInt(process.env.AUTO_EXIT_SCAN_INTERVAL_SECONDS || '30', 10);
+    this.scanIntervalSeconds = effectiveScanIntervalSeconds(
+      parseInt(process.env.AUTO_ENTRY_SCAN_INTERVAL_SECONDS || '60', 10)
+    );
+    this.exitIntervalSeconds = effectiveExitIntervalSeconds(
+      parseInt(process.env.AUTO_EXIT_SCAN_INTERVAL_SECONDS || '30', 10)
+    );
     this.priceState = { pricesBySymbol: {}, spreadProxyBySymbol: {} };
     this.timers = { scan: null, exit: null };
+    this._scanRunning = false;
+    this._exitRunning = false;
+    this._startGeneration = 0;
+    this.quoteHealthBySymbol = {};
+    this.lastNoCandidateSummary = null;
+    this.lastRejectionSummary = null;
     this.status = {
       autonomousEntryEngineVersion: this.version,
       enabled: this.enabled,
@@ -59,6 +96,8 @@ class AutonomousEntryEngine {
       lastError: null,
       warnings: [],
       metrics: {},
+      paperOnlyEnforced: true,
+      liveExecutionBlocked: true,
     };
   }
 
@@ -68,7 +107,7 @@ class AutonomousEntryEngine {
       const o = JSON.parse(raw);
       this.priceState = o && typeof o === 'object' ? o : this.priceState;
     } catch (e) {
-      if (e.code !== 'ENOENT') this.status.warnings.push(`load_price_state:${e.message}`);
+      if (e.code !== 'ENOENT') pushWarning(this.status, `load_price_state:${e.message}`);
     }
   }
 
@@ -78,7 +117,7 @@ class AutonomousEntryEngine {
       await fs.mkdir(path.dirname(p), { recursive: true });
       await fs.writeFile(p, JSON.stringify(this.priceState, null, 2), 'utf8');
     } catch (e) {
-      this.status.warnings.push(`save_price_state:${e.message}`);
+      pushWarning(this.status, `save_price_state:${e.message}`);
     }
   }
 
@@ -102,7 +141,7 @@ class AutonomousEntryEngine {
         this.status = { ...this.status, ...o };
       }
     } catch (e) {
-      if (e.code !== 'ENOENT') this.status.warnings.push(`load_status:${e.message}`);
+      if (e.code !== 'ENOENT') pushWarning(this.status, `load_status:${e.message}`);
     }
   }
 
@@ -117,7 +156,37 @@ class AutonomousEntryEngine {
     this.priceState.spreadProxyBySymbol[s] = Number(spreadProxy) || this.priceState.spreadProxyBySymbol[s] || 0;
   }
 
+  /**
+   * Quote health for gating + diagnostics. Fail-soft if timestamps missing.
+   */
+  _quoteHealth(symbol, q) {
+    const sym = String(symbol || '').toUpperCase();
+    const px = Number(q?.price);
+    const staleMs = parseStaleQuoteMs();
+    const unavailable = !(px > 0);
+    let ageMs = null;
+    let staleQuote = false;
+    if (q?.markTimestamp) {
+      const t = Date.parse(String(q.markTimestamp));
+      if (Number.isFinite(t)) {
+        ageMs = Date.now() - t;
+        staleQuote = ageMs > staleMs;
+      }
+    } else if (priceFeedService.isLiveEnabled() && q?.source === 'fallback') {
+      staleQuote = true;
+    }
+    return {
+      symbol: sym,
+      quoteUnavailable: unavailable,
+      staleQuote,
+      ageMs,
+      source: q?.source || null,
+      price: unavailable ? null : px,
+    };
+  }
+
   async refreshMarketState() {
+    const out = {};
     for (const sym of this.symbols) {
       let q;
       try {
@@ -126,18 +195,71 @@ class AutonomousEntryEngine {
         q = priceFeedService.getQuoteSync(sym);
       }
       const px = Number(q?.price);
+      const spreadProxy = Number.isFinite(Number(q?.latencyMs))
+        ? Math.min(0.01, Number(q.latencyMs) / 100000)
+        : 0.0005;
       if (px > 0) {
-        const spreadProxy = Number.isFinite(Number(q?.latencyMs))
-          ? Math.min(0.01, Number(q.latencyMs) / 100000)
-          : 0.0005;
         this._pushPrice(sym, px, spreadProxy);
       }
+      const h = this._quoteHealth(sym, q);
+      out[sym] = h;
     }
+    this.quoteHealthBySymbol = out;
     await this.savePriceState();
+    return out;
+  }
+
+  buildSafetyChecks() {
+    const E = autonomousCoordinator.parseCoordinatorEnv();
+    const timersOk = !this.running || (this.timers.scan != null && this.timers.exit != null);
+    const intervalsOk =
+      this.scanIntervalSeconds >= MIN_SCAN_INTERVAL_SECONDS &&
+      this.exitIntervalSeconds >= MIN_EXIT_INTERVAL_SECONDS;
+    return {
+      paperOnlyOk: autonomousCoordinator.PAPER_ONLY_ENFORCED === true,
+      intervalsOk,
+      timersOk,
+      positionLimitsOk: E.maxPosTotal > 0 && E.maxPosPerSymbol > 0,
+      exposureLimitsOk: E.maxNotional > E.minNotional && E.maxExposurePct > 0,
+    };
   }
 
   buildStatusSnapshot() {
-    return { ...this.status, enabled: this.enabled, running: this.running, symbols: this.symbols };
+    const flags = autonomousSetupEngine.parseEnabledSetupFlags();
+    const E = autonomousCoordinator.parseCoordinatorEnv();
+    let openAuto = 0;
+    try {
+      const paperTradingService = require('./paperTradingService');
+      openAuto = (paperTradingService.getAutonomousOpenPositions?.() || []).length;
+    } catch (e) {
+      void e;
+    }
+
+    const scanHealthy = this.status.lastError == null || this.status.metrics?.lastScan?.ok !== false;
+    const exitHealthy = this.status.lastError == null || this.status.metrics?.lastExit?.ok !== false;
+
+    return {
+      ...this.status,
+      enabled: this.enabled,
+      running: this.running,
+      symbols: this.symbols,
+      paperOnlyEnforced: true,
+      liveExecutionBlocked: true,
+      maxPositionsTotal: E.maxPosTotal,
+      maxPositionsPerSymbol: E.maxPosPerSymbol,
+      cooldownSeconds: E.symbolCooldownSec,
+      strategySymbolCooldownSeconds: E.strategySymbolCooldownSec,
+      entriesPerSymbolPerHourLimit: E.maxEntriesPerSymbolPerHour,
+      detectorEnabled: { ...flags },
+      currentOpenAutonomousPositions: openAuto,
+      scanHealthy,
+      exitHealthy,
+      lastNoCandidateSummary: this.lastNoCandidateSummary,
+      lastRejectionSummary: this.lastRejectionSummary,
+      safetyChecks: this.buildSafetyChecks(),
+      minScanIntervalFloorSeconds: MIN_SCAN_INTERVAL_SECONDS,
+      minExitIntervalFloorSeconds: MIN_EXIT_INTERVAL_SECONDS,
+    };
   }
 
   getStatus() {
@@ -146,45 +268,125 @@ class AutonomousEntryEngine {
 
   async runScanCycle() {
     const at = new Date().toISOString();
+    if (this._scanRunning) {
+      return { ok: true, skipped: true, reason: 'scan_already_running' };
+    }
+    this._scanRunning = true;
     try {
-      await this.refreshMarketState();
-      const rawCandidates = autonomousSetupEngine.detectAutonomousCandidates({
-        symbols: this.symbols,
-        state: this.priceState,
+      const quoteHealth = await this.refreshMarketState();
+
+      const { candidates: rawCandidates, detectorDiagnostics } =
+        autonomousSetupEngine.detectAutonomousCandidatesWithDiagnostics({
+          symbols: this.symbols,
+          state: this.priceState,
+        });
+
+      const marketContextBySymbol = {};
+      for (const sym of this.symbols) {
+        const h = quoteHealth[sym] || {};
+        marketContextBySymbol[sym] = {
+          quoteUnavailable: !!h.quoteUnavailable,
+          staleQuote: !!h.staleQuote,
+          source: h.source || null,
+          ageMs: h.ageMs,
+        };
+      }
+
+      const scored = rawCandidates.map((c) => {
+        const sym = String(c.symbol || '').toUpperCase();
+        const h = marketContextBySymbol[sym] || {};
+        const spreadProxy = Number(this.priceState.spreadProxyBySymbol?.[sym]) || 0;
+        return autonomousScoring.scoreAutonomousCandidate(c, {
+          spreadProxy,
+          quoteUnavailable: h.quoteUnavailable,
+          marketStale: h.staleQuote,
+        });
       });
-      const scored = rawCandidates.map((c) => autonomousScoring.scoreAutonomousCandidate(c));
-      const cycle = await autonomousCoordinator.runAutonomousEntryCycle({
-        candidates: rawCandidates,
-        scoredCandidates: scored,
-      });
+
+      const cycle = await autonomousCoordinator.runAutonomousEntryCycle(
+        {
+          candidates: rawCandidates,
+          scoredCandidates: scored,
+          marketContextBySymbol,
+        },
+        {}
+      );
+
       this.status.lastScanAt = at;
       this.status.candidatesSeen += cycle.candidatesSeen || 0;
       this.status.candidatesAccepted += cycle.candidatesAccepted || 0;
       this.status.candidatesRejected += cycle.candidatesRejected || 0;
       this.status.entriesExecuted += cycle.entriesExecuted || 0;
       if ((cycle.entriesExecuted || 0) > 0) this.status.lastExecutionAt = at;
+      this.status.lastError = null;
+
+      const recs = cycle.records || [];
+      const lastRej = [...recs].reverse().find((r) => r.finalDecision !== 'allow' || !r.executed);
+      if (lastRej && lastRej.rejectionSummary) {
+        this.lastRejectionSummary = {
+          at,
+          primaryRejectionCode: lastRej.primaryRejectionCode,
+          rejectionSummary: lastRej.rejectionSummary,
+          symbol: lastRej.symbol,
+        };
+      }
+
+      if (!rawCandidates.length) {
+        const summary = detectorDiagnostics.map((d) => ({
+          symbol: d.symbol,
+          br: (d.breakoutRejectedReasons || []).slice(0, 3),
+          pb: (d.pullbackRejectedReasons || []).slice(0, 3),
+        }));
+        this.lastNoCandidateSummary = { at, summary, detectorDiagnostics };
+        const flat = summary
+          .map((s) => `${s.symbol}: breakout=${s.br.join(';') || 'ok'} pullback=${s.pb.join(';') || 'ok'}`)
+          .join(' | ');
+        console.log(`[autonomous] no candidates emitted symbols=${this.symbols.join(',')} ${flat}`);
+      }
+
       this.status.metrics.lastScan = {
-        candidatesSeen: cycle.candidatesSeen,
-        entriesExecuted: cycle.entriesExecuted,
+        ok: true,
+        at,
+        symbolsEvaluated: this.symbols.length,
+        rawCandidatesDetected: rawCandidates.length,
+        detectorDiagnostics,
+        scoredCandidates: scored.length,
+        governanceCandidatesSeen: cycle.candidatesSeen,
+        governanceCandidatesRejected: cycle.candidatesRejected,
+        governanceCandidatesAccepted: cycle.candidatesAccepted,
+        entriesExecuted: cycle.entriesExecuted || 0,
+        lastNoCandidateSummary: !rawCandidates.length ? this.lastNoCandidateSummary : null,
       };
+
       await this.saveStatus();
       return cycle;
     } catch (e) {
       this.status.lastScanAt = at;
       this.status.lastError = e.message;
+      this.status.metrics.lastScan = { ok: false, at, error: e.message };
+      pushWarning(this.status, `runScanCycle:${e.message}`);
       await this.saveStatus();
       return { ok: false, error: e.message };
+    } finally {
+      this._scanRunning = false;
     }
   }
 
   async runExitCycle() {
     const at = new Date().toISOString();
+    if (this._exitRunning) {
+      return { ok: true, skipped: true, reason: 'exit_already_running' };
+    }
+    this._exitRunning = true;
     try {
       await this.refreshMarketState();
       const cycle = await autonomousExitManager.runAutonomousExitCycle();
       this.status.lastExitCheckAt = at;
       this.status.exitsExecuted += cycle.exitsExecuted || 0;
+      this.status.lastError = null;
       this.status.metrics.lastExit = {
+        ok: true,
+        at,
         openAutonomousPositions: cycle.openAutonomousPositions,
         exitsExecuted: cycle.exitsExecuted,
       };
@@ -193,13 +395,25 @@ class AutonomousEntryEngine {
     } catch (e) {
       this.status.lastExitCheckAt = at;
       this.status.lastError = e.message;
+      this.status.metrics.lastExit = { ok: false, at, error: e.message };
+      pushWarning(this.status, `runExitCycle:${e.message}`);
       await this.saveStatus();
       return { ok: false, error: e.message };
+    } finally {
+      this._exitRunning = false;
     }
   }
 
   async start() {
     this.enabled = isEnabled();
+    this.symbols = parseSymbols();
+    this.scanIntervalSeconds = effectiveScanIntervalSeconds(
+      parseInt(process.env.AUTO_ENTRY_SCAN_INTERVAL_SECONDS || '60', 10)
+    );
+    this.exitIntervalSeconds = effectiveExitIntervalSeconds(
+      parseInt(process.env.AUTO_EXIT_SCAN_INTERVAL_SECONDS || '30', 10)
+    );
+
     if (!this.enabled) {
       this.running = false;
       this.status.enabled = false;
@@ -207,27 +421,55 @@ class AutonomousEntryEngine {
       await this.saveStatus();
       return this.getStatus();
     }
-    if (this.running) return this.getStatus();
+
+    if (this.running) {
+      return this.getStatus();
+    }
+
+    const gen = (this._startGeneration || 0) + 1;
+    this._startGeneration = gen;
+
     await this.loadStatus();
     await this.loadPriceState();
     this.running = true;
     this.status.enabled = true;
     this.status.running = true;
+    this.status.paperOnlyEnforced = true;
+    this.status.liveExecutionBlocked = true;
+
+    const scanMs = this.scanIntervalSeconds * 1000;
+    const exitMs = this.exitIntervalSeconds * 1000;
+
     this.timers.scan = setInterval(() => {
+      if (this._startGeneration !== gen) return;
       this.runScanCycle().catch((e) => {
         this.status.lastError = e.message;
       });
-    }, Math.max(5, this.scanIntervalSeconds) * 1000);
+    }, scanMs);
     this.timers.exit = setInterval(() => {
+      if (this._startGeneration !== gen) return;
       this.runExitCycle().catch((e) => {
         this.status.lastError = e.message;
       });
-    }, Math.max(5, this.exitIntervalSeconds) * 1000);
+    }, exitMs);
+
+    try {
+      await this.runScanCycle();
+    } catch (e) {
+      pushWarning(this.status, `immediate_scan:${e.message}`);
+    }
+    try {
+      await this.runExitCycle();
+    } catch (e) {
+      pushWarning(this.status, `immediate_exit:${e.message}`);
+    }
+
     await this.saveStatus();
     return this.getStatus();
   }
 
   async stop() {
+    this._startGeneration = (this._startGeneration || 0) + 1;
     if (this.timers.scan) clearInterval(this.timers.scan);
     if (this.timers.exit) clearInterval(this.timers.exit);
     this.timers.scan = null;

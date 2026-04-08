@@ -28,6 +28,9 @@ function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, x));
 }
 
+const PAPER_ONLY_ENFORCED = true;
+const LIVE_EXECUTION_BLOCKED_FOR_AUTONOMOUS = true;
+
 function parseCoordinatorEnv() {
   return {
     symbolCooldownSec: parseInt(process.env.AUTO_ENTRY_SYMBOL_COOLDOWN_SECONDS || '600', 10),
@@ -48,6 +51,46 @@ function parseCoordinatorEnv() {
     qtyStep: parseFloat(process.env.AUTO_ENTRY_QUANTITY_STEP || '0.001'),
     historyMaxRead: parseInt(process.env.AUTO_ENTRY_HISTORY_MAX_READ || '5000', 10),
   };
+}
+
+/**
+ * Map internal governance reasons to stable API / journal codes.
+ */
+function mapGovernanceReasonToCanonical(reason) {
+  const r = String(reason || '');
+  const table = {
+    long_only_paper_autonomous_v1: 'policy_restricted',
+    failed_pre_governance_score: 'weak_setup_quality',
+    policy_mode_defensive: 'policy_restricted',
+    policy_mode_degraded: 'policy_restricted',
+    policy_mode_restricted: 'policy_restricted',
+    policy_mode_cautious: 'policy_restricted',
+    policy_symbol_ineligible: 'policy_restricted',
+    policy_strategy_ineligible: 'policy_restricted',
+    severe_crowding: 'overlap_crowding_high',
+    same_symbol_position_exists: 'position_exists_same_symbol',
+    max_autonomous_positions_reached: 'max_positions_reached',
+    symbol_cooldown_active: 'cooldown_active',
+    strategy_symbol_cooldown_active: 'cooldown_active',
+    entries_per_symbol_per_hour_limit: 'cooldown_active',
+    invalid_sizing: 'notional_below_min',
+    notional_below_min: 'notional_below_min',
+    notional_above_max: 'notional_above_max',
+    market_state_unavailable: 'market_state_unavailable',
+    stale_quote: 'stale_quote',
+    allocation_unavailable: 'allocation_unavailable',
+  };
+  if (table[r]) return table[r];
+  if (r.startsWith('policy_mode_')) return 'policy_restricted';
+  return r || 'unknown';
+}
+
+function canonicalPrimaryRejection(governanceReasons, scored) {
+  if (governanceReasons && governanceReasons.length) {
+    return mapGovernanceReasonToCanonical(governanceReasons[0]);
+  }
+  if (scored?.primaryRejectionCode) return scored.primaryRejectionCode;
+  return 'unknown';
 }
 
 function strategyNameForCandidate(candidate) {
@@ -174,7 +217,9 @@ function computeSizing(candidate, accountSummary, allocationContext, overlapCont
     Number(accountSummary?.balance) ||
     0;
   const px = Number(candidate.entryReferencePrice) || 0;
-  if (!(equity > 0 && px > 0)) return { quantity: 0, notional: 0 };
+  if (!(equity > 0 && px > 0)) {
+    return { quantity: 0, notional: 0, sizingReason: 'market_state_unavailable' };
+  }
 
   const stop = Number(candidate.stopLoss);
   const stopDist = Number.isFinite(stop) ? Math.abs(px - stop) : px * 0.004;
@@ -184,16 +229,32 @@ function computeSizing(candidate, accountSummary, allocationContext, overlapCont
 
   let notional = Math.max(E.minNotional, Math.min(notionalCap, E.maxNotional));
   if (allocationContext?.symbolRecommendedCapital != null) {
-    notional = Math.min(notional, Number(allocationContext.symbolRecommendedCapital) || notional);
+    const symCap = Number(allocationContext.symbolRecommendedCapital);
+    if (Number.isFinite(symCap) && symCap >= 0) {
+      notional = Math.min(notional, symCap);
+    }
   }
   const crowd = Number(overlapContext?.totalCrowdingScore) || 0;
   const crowdMul = clamp(1 - crowd * 0.6, 0.3, 1);
   notional *= crowdMul;
 
+  if (notional > E.maxNotional + 1e-6) {
+    return { quantity: 0, notional: 0, sizingReason: 'notional_above_max' };
+  }
+
   let qty = Math.min(qtyByRisk > 0 ? qtyByRisk : notional / px, notional / px);
   qty = quantize(qty, E.qtyStep);
-  if (!(qty > 0)) return { quantity: 0, notional: 0 };
-  return { quantity: round4(qty), notional: round4(qty * px) };
+  const n = qty * px;
+  if (!(qty > 0)) {
+    return { quantity: 0, notional: 0, sizingReason: 'notional_below_min' };
+  }
+  if (n < E.minNotional - 1e-6) {
+    return { quantity: 0, notional: 0, sizingReason: 'notional_below_min' };
+  }
+  if (n > E.maxNotional + 1e-6) {
+    return { quantity: 0, notional: 0, sizingReason: 'notional_above_max' };
+  }
+  return { quantity: round4(qty), notional: round4(n), sizingReason: null };
 }
 
 function getOpenPositionContext(candidate, accountSummary) {
@@ -247,6 +308,7 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
   const overlapState =
     deps.overlapState || (await correlationOverlapService.loadLatestCorrelationOverlapState());
   const accountSummary = deps.accountSummary || paperTradingService.getAccountSummary();
+  const marketCtx = deps.marketContext || {};
 
   const policyCtx = latestPolicyContextForCandidate(policyState, candidate);
   const allocCtx = allocationContextForCandidate(allocationPlan, candidate);
@@ -255,13 +317,22 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
   const cooldownCtx = await getCooldownContext(candidate, nowIso);
 
   let governanceDecision = 'allow';
+  if (marketCtx.quoteUnavailable) {
+    governanceDecision = 'reject';
+    reasons.push('market_state_unavailable');
+  } else if (marketCtx.staleQuote) {
+    governanceDecision = 'reject';
+    reasons.push('stale_quote');
+  }
   if (String(candidate.side || 'BUY').toUpperCase() !== 'BUY') {
     governanceDecision = 'reject';
     reasons.push('long_only_paper_autonomous_v1');
   }
   if (!scored?.eligiblePreGovernance) {
     governanceDecision = 'reject';
-    reasons.push('failed_pre_governance_score');
+    if (!marketCtx.quoteUnavailable && !marketCtx.staleQuote) {
+      reasons.push('failed_pre_governance_score');
+    }
   }
   const mode = String(policyCtx.global?.portfolioRiskMode || 'normal').toLowerCase();
   if (mode === 'defensive' || mode === 'degraded') {
@@ -311,7 +382,22 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
   const sizing = computeSizing(candidate, accountSummary, allocCtx, ovCtx);
   if (!(sizing.quantity > 0 && sizing.notional >= E.minNotional)) {
     governanceDecision = 'reject';
-    reasons.push('invalid_sizing');
+    if (sizing.sizingReason === 'notional_above_max') {
+      reasons.push('notional_above_max');
+    } else if (sizing.sizingReason === 'notional_below_min') {
+      reasons.push('notional_below_min');
+    } else {
+      reasons.push('invalid_sizing');
+    }
+  }
+
+  if (
+    allocCtx.deployableCapital != null &&
+    Number(allocCtx.deployableCapital) <= 0 &&
+    governanceDecision === 'allow'
+  ) {
+    governanceDecision = 'reject';
+    reasons.unshift('allocation_unavailable');
   }
 
   const finalDecision = governanceDecision === 'allow' ? 'allow' : 'reject';
@@ -355,6 +441,9 @@ async function buildGovernanceDecision(candidate, scored, deps = {}) {
       source: 'autonomous_entry_engine',
       generatedAt: nowIso,
     },
+    marketContext: marketCtx,
+    canonicalRejectionCodes: reasons.map((x) => mapGovernanceReasonToCanonical(x)),
+    primaryCanonicalRejection: mapGovernanceReasonToCanonical(reasons[0]),
     orderIntent,
   };
 }
@@ -393,8 +482,10 @@ function buildOrderIntentFromCandidate(candidate, sizing, context = {}) {
 
 async function submitAutonomousPaperOrder(orderIntent, deps = {}) {
   const gate = deps.liveExecutionGate || liveExecutionGate;
-  if (String(gate.getTradingMode ? gate.getTradingMode() : 'paper').toLowerCase() !== 'paper') {
-    return { ok: false, reason: 'autonomous_engine_paper_only' };
+  const mode = String(gate.getTradingMode ? gate.getTradingMode() : 'paper').toLowerCase();
+  if (mode !== 'paper') {
+    console.warn(`[autonomous] BLOCKED non-paper trading mode=${mode} (autonomous is paper-only)`);
+    return { ok: false, reason: 'autonomous_engine_paper_only', paperOnlyEnforced: PAPER_ONLY_ENFORCED };
   }
   const accountBalance =
     deps.accountBalance ||
@@ -408,11 +499,18 @@ async function submitAutonomousPaperOrder(orderIntent, deps = {}) {
 async function runAutonomousEntryCycle(input = {}, deps = {}) {
   const candidates = Array.isArray(input.candidates) ? input.candidates : [];
   const scoredMap = new Map((input.scoredCandidates || []).map((s) => [s.candidateId, s]));
+  const marketBySymbol = input.marketContextBySymbol && typeof input.marketContextBySymbol === 'object'
+    ? input.marketContextBySymbol
+    : {};
   const records = [];
 
   for (const c of candidates) {
     const scored = scoredMap.get(c.candidateId) || null;
-    const decision = await buildGovernanceDecision(c, scored, deps);
+    const sym = String(c.symbol || '').toUpperCase();
+    const decision = await buildGovernanceDecision(c, scored, {
+      ...deps,
+      marketContext: marketBySymbol[sym] || {},
+    });
     let execution = null;
     let executed = false;
     if (decision.finalDecision === 'allow' && decision.orderIntent) {
@@ -423,6 +521,7 @@ async function runAutonomousEntryCycle(input = {}, deps = {}) {
         execution = { ok: false, reason: e.message };
       }
     }
+    const govReasons = Array.isArray(decision.reasons) ? decision.reasons : [];
     const record = {
       generatedAt: new Date().toISOString(),
       candidateId: c.candidateId,
@@ -431,8 +530,24 @@ async function runAutonomousEntryCycle(input = {}, deps = {}) {
       setupType: c.setupType,
       score: scored?.score ?? null,
       confidence: scored?.confidence ?? null,
+      scoringPrimaryRejection: scored?.primaryRejectionCode ?? null,
+      scoringRejectionCodes: scored?.rejectionCodes ?? [],
       finalDecision: decision.finalDecision,
       finalReason: executed ? 'executed' : decision.finalReason,
+      primaryRejectionCode: executed
+        ? null
+        : canonicalPrimaryRejection(govReasons, scored),
+      rejectionSummary: executed
+        ? null
+        : {
+            layer: govReasons.includes('failed_pre_governance_score') ? 'scoring' : 'governance',
+            governanceReasons: govReasons,
+            canonical: canonicalPrimaryRejection(govReasons, scored),
+            scoring: {
+              primary: scored?.primaryRejectionCode || null,
+              codes: scored?.rejectionCodes || [],
+            },
+          },
       executed,
       executionResult: execution || null,
       decision,
@@ -459,8 +574,12 @@ async function getAutonomousRejections(limit = 100) {
 }
 
 module.exports = {
+  PAPER_ONLY_ENFORCED,
+  LIVE_EXECUTION_BLOCKED_FOR_AUTONOMOUS,
   parseCoordinatorEnv,
   strategyNameForCandidate,
+  mapGovernanceReasonToCanonical,
+  canonicalPrimaryRejection,
   saveLatestAutonomousEntry,
   appendAutonomousEntryHistory,
   readAutonomousEntryHistory,

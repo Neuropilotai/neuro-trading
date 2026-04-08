@@ -28,6 +28,40 @@ async function withTempDataDir(fn) {
 async function run() {
   console.log('autonomousEntryEngine tests…');
 
+  // Modest upward drift + near high: breakout should emit BUY
+  const modestBreakoutState = {
+    pricesBySymbol: {
+      XAUUSD: [100, 100.1, 100.15, 100.2, 100.25, 100.28, 100.3],
+    },
+    spreadProxyBySymbol: { XAUUSD: 0.0004 },
+  };
+  process.env.AUTO_ENTRY_BREAKOUT_MIN = '0.015';
+  const br = setupEngine.detectBreakoutContinuation('XAUUSD', modestBreakoutState);
+  assert.ok(br && br.setupType === 'breakout_continuation');
+  assert.strictEqual(String(br.side).toUpperCase(), 'BUY');
+
+  // Pullback: uptrend window with retrace from high
+  const modestPullbackState = {
+    pricesBySymbol: {
+      EURUSD: [1.1, 1.102, 1.105, 1.108, 1.11, 1.109, 1.1075, 1.108],
+    },
+    spreadProxyBySymbol: { EURUSD: 0.0004 },
+  };
+  process.env.AUTO_ENTRY_PULLBACK_MIN = '0.08';
+  process.env.AUTO_ENTRY_PULLBACK_TREND_MIN = '0.0008';
+  const pb = setupEngine.detectTrendPullback('EURUSD', modestPullbackState);
+  assert.ok(pb && pb.setupType === 'trend_pullback');
+  assert.strictEqual(String(pb.side).toUpperCase(), 'BUY');
+
+  const withDiag = setupEngine.detectAutonomousCandidatesWithDiagnostics({
+    symbols: ['MISSING'],
+    state: { pricesBySymbol: {} },
+  });
+  assert.ok(Array.isArray(withDiag.detectorDiagnostics));
+  assert.strictEqual(withDiag.candidates.length, 0);
+  const d0 = withDiag.detectorDiagnostics[0];
+  assert.ok(d0.breakoutRejectedReasons.length || d0.pullbackRejectedReasons.length);
+
   const state = {
     pricesBySymbol: {
       XAUUSD: [100, 100.2, 100.4, 100.8, 101.2, 101.6, 101.8, 102.1],
@@ -36,10 +70,6 @@ async function run() {
     spreadProxyBySymbol: { XAUUSD: 0.0008, EURUSD: 0.0005 },
   };
 
-  const br = setupEngine.detectBreakoutContinuation('XAUUSD', state);
-  assert.ok(br && br.setupType === 'breakout_continuation');
-  const pb = setupEngine.detectTrendPullback('EURUSD', state);
-  assert.ok(pb || true); // may vary with threshold, detectAutonomousCandidates covers both paths
   const none = setupEngine.detectBreakoutContinuation('GBPUSD', { pricesBySymbol: { GBPUSD: [1.2] } });
   assert.strictEqual(none, null);
 
@@ -72,6 +102,10 @@ async function run() {
     { cooldownPenalty: 0.2, duplicatePenalty: 0.2 }
   );
   assert.ok(low.score <= hi.score);
+
+  const staleScored = scoring.scoreAutonomousCandidate(cHi, { marketStale: true });
+  assert.strictEqual(staleScored.eligiblePreGovernance, false);
+  assert.strictEqual(staleScored.primaryRejectionCode, 'stale_quote');
 
   await withTempDataDir(async () => {
     process.env.CROWDING_SEVERE_THRESHOLD = '0.5';
@@ -126,6 +160,7 @@ async function run() {
     assert.strictEqual(cycle.candidatesSeen, 1);
     const latest = await coordinator.loadLatestAutonomousEntry();
     assert.ok(latest && latest.candidateId === 'cand-a');
+    assert.ok(latest.rejectionSummary == null || latest.primaryRejectionCode);
     const hist = await coordinator.readAutonomousEntryHistory(10);
     assert.ok(hist.length >= 1);
 
@@ -138,6 +173,27 @@ async function run() {
       }
     );
     assert.strictEqual(rej.finalDecision, 'reject');
+
+    const liveDeps = {
+      ...deps,
+      liveExecutionGate: {
+        getTradingMode: () => 'live',
+        executeOrder: async () => ({ success: true }),
+      },
+    };
+    const paperBlock = await coordinator.submitAutonomousPaperOrder(
+      { symbol: 'XAUUSD', action: 'BUY', quantity: 1, price: 1 },
+      liveDeps
+    );
+    assert.strictEqual(paperBlock.ok, false);
+    assert.strictEqual(paperBlock.reason, 'autonomous_engine_paper_only');
+
+    const badMarket = await coordinator.buildGovernanceDecision(cand, scored, {
+      ...deps,
+      marketContext: { quoteUnavailable: true },
+    });
+    assert.strictEqual(badMarket.finalDecision, 'reject');
+    assert.ok(badMarket.reasons.includes('market_state_unavailable'));
   });
 
   const exitEvalStop = exitManager.evaluateAutonomousExit(
@@ -166,6 +222,9 @@ async function run() {
     const eng = new AutonomousEntryEngine();
     const scan = await eng.runScanCycle();
     assert.ok(scan && typeof scan === 'object');
+    assert.ok(eng.status.metrics.lastScan && eng.status.metrics.lastScan.detectorDiagnostics);
+    assert.ok(eng.lastNoCandidateSummary && Array.isArray(eng.lastNoCandidateSummary.summary));
+
     const exits = await eng.runExitCycle();
     assert.ok(exits && typeof exits === 'object');
 
@@ -173,11 +232,21 @@ async function run() {
     const before = eng.getStatus();
     await eng.loadStatus();
     assert.strictEqual(typeof before.autonomousEntryEngineVersion, 'number');
+    assert.strictEqual(before.paperOnlyEnforced, true);
+    assert.strictEqual(before.liveExecutionBlocked, true);
+    assert.ok(before.safetyChecks && before.safetyChecks.paperOnlyOk);
 
     const started = await eng.start();
     assert.strictEqual(started.running, true);
+    assert.ok(started.metrics && started.metrics.lastScan);
+
+    const started2 = await eng.start();
+    assert.strictEqual(started2.running, true);
+
     const stopped = await eng.stop();
     assert.strictEqual(stopped.running, false);
+    assert.strictEqual(eng.timers.scan, null);
+    assert.strictEqual(eng.timers.exit, null);
   });
 
   console.log('✅ autonomousEntryEngine tests passed');
