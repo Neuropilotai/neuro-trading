@@ -375,7 +375,7 @@ class PaperTradingService extends EventEmitter {
 
     try {
       const quote = priceFeedService.getQuoteSync(normSym);
-      await closedTradeAnalyticsService.recordClosedTrade({
+      const recorded = await closedTradeAnalyticsService.recordClosedTrade({
         symbol: normSym,
         entryPriceAvg: position.avgPrice,
         exitPriceAvg: price,
@@ -398,6 +398,22 @@ class PaperTradingService extends EventEmitter {
         tradeGroupId: position.tradeGroupId || null,
         closeSequence,
       });
+      // RL + policy/allocation refresh (non-blocking); only if a row was actually persisted
+      if (recorded != null) {
+        console.log(
+          `[closed-trades] recorded tradeCloseId=${recorded.tradeCloseId || '?'} → scheduling RL+policy`
+        );
+        try {
+          const { scheduleLearningAndPolicyAfterClosedTrade } = require('./postClosedTradeLearningPolicyHook');
+          scheduleLearningAndPolicyAfterClosedTrade();
+        } catch (e) {
+          console.warn(`[post-closed-trade-hook] ${e && e.message}`);
+        }
+      } else if (!closedTradeAnalyticsService.isEnabled()) {
+        console.warn(
+          '[closed-trades] persistence skipped: ENABLE_CLOSED_TRADE_ANALYTICS is false → no closed_trades row, RL/policy hook not run'
+        );
+      }
     } catch (err) {
       console.warn(`[closed-trades] recordClosedTrade failed: ${err && err.message}`);
     }
