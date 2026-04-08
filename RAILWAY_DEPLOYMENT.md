@@ -4,6 +4,24 @@
 
 ---
 
+## 0. Frozen baseline — paper lifecycle (Railway validated)
+
+Use this as the **reference** for controlled paper production after lifecycle/rebuild validation. Change only deliberately and update this section when the baseline changes.
+
+| Variable | Value |
+|----------|--------|
+| **DATA_DIR** | `/data` |
+| **LEDGER_DB_PATH** | `/data/trade_ledger.db` |
+| **PAPER_STATE_RESET_ON_BOOT** | `false` or unset |
+| **PAPER_REBUILD_EMPTY_LEDGER_RESETS** | `false` or unset |
+| **ENABLE_TRADE_LEDGER** | `true` |
+
+**Infrastructure:** persistent volume mounted at **`/data`** (must match `DATA_DIR`).
+
+**Git:** annotated tag **`paper-lifecycle-railway-validated`** marks a known-good code + runbook state for this baseline.
+
+---
+
 ## Configuration recommandée (quick setup)
 
 1. **Garder l’ancien Railway en place** — Ne rien modifier sur le service actuel.
@@ -29,8 +47,8 @@
    | **TRADING_ENABLED** | `false` *(éviter le live par accident au début)* |
    | **ENABLE_WEBHOOK_AUTH** | `true` |
 
-   **À ne pas définir au début** (le code utilise `DATA_DIR` par défaut) :  
-   `WEBHOOK_PORT`, `LEDGER_DB_PATH`, `EVALUATION_DB_PATH`, `DEDUPE_CACHE_FILE` — laisse-les vides.
+   **Optionnel au début** : `WEBHOOK_PORT`, `EVALUATION_DB_PATH`, `DEDUPE_CACHE_FILE` — le code dérive des chemins sous `DATA_DIR` si non définis.  
+   **Pour le paper avec lifecycle fiable** : définir explicitement **`LEDGER_DB_PATH=/data/trade_ledger.db`** (voir §3 « Paper lifecycle ») afin d’aligner SQLite et JSON sur le même volume.
 
 ---
 
@@ -126,6 +144,24 @@
 
 All writable paths respect **DATA_DIR**. Set **DATA_DIR=/data** and mount a Railway volume at **/data** so that SQLite DBs and all file writes persist across deploys.
 
+### Paper account state + ledger rebuild (controlled paper production)
+
+The paper account file is **`DATA_DIR/paper_trading_state.json`** (`paperTradingService.getPaperStateFilePath`). The trade ledger defaults to **`DATA_DIR/trade_ledger.db`** unless **BRAIN_DIR** or **LEDGER_DB_PATH** overrides it (`brainPaths.getLedgerPath`).
+
+**Validated block on Railway** (single volume at `/data`, lifecycle + restart persistence):
+
+| Variable | Value | Role |
+|----------|--------|------|
+| **DATA_DIR** | `/data` | JSON state, dedupe, logs, etc. |
+| **LEDGER_DB_PATH** | `/data/trade_ledger.db` | Explicit SQLite ledger on the volume (avoids split with `cwd`/ephemeral). |
+| **ENABLE_TRADE_LEDGER** | `true` | Required for FILLED replay on boot. |
+| **PAPER_STATE_RESET_ON_BOOT** | `false` or unset | Prevents dev-style wipe on every boot. |
+| **PAPER_REBUILD_EMPTY_LEDGER_RESETS** | `false` or unset | Prevents reset when ledger has 0 FILLED; falls back to JSON instead. |
+
+If **`DATA_DIR`** is not the mounted volume, or the ledger file is not on persistent disk, restarts can show **initial balance** (e.g. `ACCOUNT_BALANCE`) and **0 trades** even after successful sessions — that is a **path/volume configuration** issue, not the trading logic.
+
+Boot logs to grep: **`[paper_boot]`**, **`[paper] rebuild`**, **`Loaded paper trading account state`**. Structured failure signal: **`paper_ledger_update_failed_after_fill`**.
+
 ---
 
 ## 4. SQLite Storage: Use /data (Mounted Volume)
@@ -182,6 +218,16 @@ BROKER=paper
 ACCOUNT_BALANCE=10000
 ```
 
+**Paper lifecycle persistence (Railway volume — recommended):**
+```bash
+DATA_DIR=/data
+LEDGER_DB_PATH=/data/trade_ledger.db
+ENABLE_TRADE_LEDGER=true
+# omit or false:
+# PAPER_STATE_RESET_ON_BOOT=false
+# PAPER_REBUILD_EMPTY_LEDGER_RESETS=false
+```
+
 ---
 
 ## 7. Risks
@@ -211,3 +257,51 @@ curl -s -X POST $BASE/webhook/tradingview \
   -H "X-TradingView-Signature: sha256=<hmac-of-body>" \
   -d '{"symbol":"XAUUSD","action":"BUY","price":2650,"quantity":0.01,"alert_id":"verify-'$(date +%s)'","timestamp":'$(date +%s)'}' | jq .
 ```
+
+---
+
+## 9. Post-deploy smoke checklist (5 checks)
+
+Run in order after each deploy (or when validating a new environment):
+
+| # | Check | Pass criteria |
+|---|--------|----------------|
+| 1 | **GET `/health`** | HTTP 200, healthy status in body. |
+| 2 | **GET `/api/account`** | JSON reflects paper account; no unexpected errors. |
+| 3 | **One controlled BUY** | Webhook or internal path; ledger row reaches **FILLED**; balance/positions update. |
+| 4 | **One controlled CLOSE** (or SELL flat) | Exit **FILLED**; open positions coherent. |
+| 5 | **Restart service + re-check** | **`/api/account`** (and optionally **`/api/autonomous/open-positions`**) match pre-restart **balance / totalPnL / totalTrades** (not reset to initial `ACCOUNT_BALANCE` with 0 trades). Logs show **`[paper_boot]`** with sensible `rebuild_source` / `filled_rows_count`. |
+
+---
+
+## 10. Red flags and alerts
+
+Investigate immediately if any of these appear in production:
+
+| Signal | Likely meaning |
+|--------|----------------|
+| **Account returns to `ACCOUNT_BALANCE` / `totalTrades: 0` / `totalPnL: 0` after restart** | `DATA_DIR` or ledger DB not on persistent volume, or paths split (JSON vs SQLite). Re-read §0 and §3. |
+| **No `[paper_boot]` line after boot** | Paper `initializeState` may not have run, logging suppressed, or wrong log stream. |
+| **`paper_ledger_update_failed_after_fill` (JSON event)** | In-memory fill succeeded but SQLite update failed after fill — risk of ledger/account drift; check disk, permissions, DB path. |
+| **Ledger file and `paper_trading_state.json` not both under `/data`** | Misconfiguration: e.g. `BRAIN_DIR` or unset `DATA_DIR` pointing one store at ephemeral disk. Align on one volume (§0). |
+| **`mismatch_detected: true` in `paper_boot_metrics`** | Open positions from JSON but 0 FILLED in ledger — historical misalignment; investigate before scaling size. |
+
+---
+
+## 11. Autonomous path validation (Railway)
+
+After the **manual/webhook** path is proven (§9), validate **one full autonomous cycle** on the deployed instance:
+
+1. Ensure autonomous entry/exit workers/schedules are enabled as in your operator config.
+2. Allow **one autonomous entry** (or trigger the smallest safe test your ops allow).
+3. Confirm **FILLED** rows and account state via **`/api/account`** and logs.
+4. **Close** via autonomous exit (or one autonomous CLOSE) and confirm ledger + JSON.
+5. **Restart** the Railway service and confirm **the same** balance / totalPnL / totalTrades / openPositions as before restart (same persistence rules as webhook).
+
+This proves autonomous and webhook paths share the same **`paperTradingService.executeOrder`** durability behavior when env matches §0.
+
+---
+
+## 12. Next lifecycle risk (backlog)
+
+**Partial fills / EXECUTED-only rows:** If an order is only partially filled, the ledger may stay **EXECUTED** without **FILLED**; `getFilledTrades()` only returns **FILLED**, so **rebuild from ledger** may omit that leg. This is the most meaningful remaining lifecycle edge case after full-fill paths are validated. Addressing it is a **product/tech decision** (include EXECUTED in replay vs reject partials vs document-only).
