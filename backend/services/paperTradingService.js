@@ -158,6 +158,18 @@ class PaperTradingService extends EventEmitter {
         executionResult
       });
 
+      try {
+        const shadowAllocationService = require('./shadowAllocationService');
+        await shadowAllocationService.logShadowAfterPaperExecution({
+          tradeId,
+          orderIntent,
+          executionResult,
+          action,
+        });
+      } catch (e) {
+        console.warn(`[shadow-allocation] ${e && e.message}`);
+      }
+
       return {
         success: true,
         tradeId,
@@ -215,6 +227,19 @@ class PaperTradingService extends EventEmitter {
       tradeGroupId,
       closeSequence: existingPosition.closeSequence || 0,
     });
+
+    try {
+      const tradeLifecycleService = require('./tradeLifecycleService');
+      tradeLifecycleService.notifyBuyFilled({
+        tradeGroupId,
+        symbol: this.normalizeSymbol(symbol),
+        fillPrice: price,
+        avgPrice: newAvgPrice,
+        quantity: newQuantity,
+      });
+    } catch (err) {
+      console.warn(`[lifecycle] notifyBuyFilled failed: ${err && err.message}`);
+    }
 
     // Deduct from balance
     this.account.balance -= cost;
@@ -293,8 +318,25 @@ class PaperTradingService extends EventEmitter {
         ? new Date(position.entryTime).toISOString()
         : executedAt;
 
-    // Update position
     const newQuantity = position.quantity - sellQuantity;
+
+    let lifecycleSummary = null;
+    try {
+      const tradeLifecycleService = require('./tradeLifecycleService');
+      const { finalized } = tradeLifecycleService.notifySellFill({
+        tradeGroupId: position.tradeGroupId,
+        symbol: normSym,
+        exitPrice: price,
+        pnl,
+        newOpenQuantity: newQuantity,
+        exitTimestamp: executedAt,
+      });
+      if (finalized) lifecycleSummary = finalized;
+    } catch (err) {
+      console.warn(`[lifecycle] notifySellFill failed: ${err && err.message}`);
+    }
+
+    // Update position
     if (newQuantity <= 0) {
       this.account.positions.delete(symbol);
     } else {
@@ -351,6 +393,8 @@ class PaperTradingService extends EventEmitter {
         fees: 0,
         slippage: null,
         stopLoss: orderIntent ? orderIntent.stopLoss : null,
+        regime: orderIntent && orderIntent.regime != null ? orderIntent.regime : null,
+        lifecycleSummary: lifecycleSummary || null,
         tradeGroupId: position.tradeGroupId || null,
         closeSequence,
       });

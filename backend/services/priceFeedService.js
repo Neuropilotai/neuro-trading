@@ -51,6 +51,12 @@ class PriceFeedService {
     const p = Number(price);
     if (!n || !Number.isFinite(p) || p <= 0) return;
     this.lastSeenBySymbol.set(n, p);
+    try {
+      const tradeLifecycleService = require('./tradeLifecycleService');
+      tradeLifecycleService.notifyPriceTick(n, p);
+    } catch (e) {
+      /* never break pricing path */
+    }
   }
 
   /**
@@ -164,6 +170,12 @@ class PriceFeedService {
     console.log(
       `[PRICE_FEED] symbol=${n} price=${mid} source=OANDA latency=${latencyMs}ms inst=${instrument}`
     );
+    try {
+      const tradeLifecycleService = require('./tradeLifecycleService');
+      tradeLifecycleService.notifyPriceTick(n, mid);
+    } catch (e) {
+      /* never break fetch path */
+    }
   }
 
   /**

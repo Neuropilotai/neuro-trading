@@ -15,6 +15,10 @@
 // Load environment variables first
 require('dotenv').config();
 
+function isDevEndpointsEnabled() {
+    return process.env.NODE_ENV === 'development' || process.env.ENABLE_DEV_ENDPOINTS === 'true';
+}
+
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
@@ -30,6 +34,13 @@ const tradeLedger = require('./backend/db/tradeLedger');
 const paperTradingService = require('./backend/services/paperTradingService'); // Keep for backward compatibility
 const priceFeedService = require('./backend/services/priceFeedService');
 const closedTradeAnalyticsService = require('./backend/services/closedTradeAnalyticsService');
+const tradeLifecycleService = require('./backend/services/tradeLifecycleService');
+const analyticsOverviewService = require('./backend/services/analyticsOverviewService');
+const reinforcementLearningService = require('./backend/services/reinforcementLearningService');
+const policyApplicationService = require('./backend/services/policyApplicationService');
+const capitalAllocationService = require('./backend/services/capitalAllocationService');
+const policyStabilityService = require('./backend/services/policyStabilityService');
+const shadowAllocationService = require('./backend/services/shadowAllocationService');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
@@ -657,10 +668,60 @@ app.get('/api/account', async (req, res) => {
     }
 });
 
-// Learning metrics endpoint
+// Learning metrics endpoint (legacy stub)
 app.get('/api/learning', (req, res) => {
     const learningMetrics = tradingLearningService.getMetrics();
     res.json(learningMetrics);
+});
+
+// RL / adaptive policy layer (advisory; persisted state in learning_state_v2.json)
+app.get('/api/learning/overview', async (req, res) => {
+    try {
+        const overview = await reinforcementLearningService.getLearningOverview();
+        res.json(overview);
+    } catch (error) {
+        console.error('❌ /api/learning/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/learning/buckets', async (req, res) => {
+    try {
+        const data = await reinforcementLearningService.getLearningBuckets();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/learning/buckets:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/learning/decisions', async (req, res) => {
+    try {
+        const data = await reinforcementLearningService.getLearningDecisions();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/learning/decisions:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/learning/run', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const state = await reinforcementLearningService.runLearningCycle({
+            from: req.query.from || req.body?.from,
+            to: req.query.to || req.body?.to,
+            symbol: req.query.symbol || req.body?.symbol,
+            strategy: req.query.strategy || req.body?.strategy,
+            limit: req.query.limit || req.body?.limit,
+        });
+        res.json({ ok: true, ...state });
+    } catch (error) {
+        console.error('❌ /api/learning/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
 });
 
 // Closed trade analytics (read-only JSONL journal)
@@ -714,12 +775,329 @@ app.get('/api/closed-trades/recent', async (req, res) => {
     }
 });
 
-// ===== DEV-ONLY DEDUPE ENDPOINTS =====
+app.get('/api/closed-trades/attribution', async (req, res) => {
+    try {
+        const groupBy = req.query.groupBy
+            ? String(req.query.groupBy)
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+            : undefined;
+        const attribution =
+            await closedTradeAnalyticsService.getPerformanceAttributionFiltered({
+                groupBy,
+                limit: req.query.limit,
+                symbol: req.query.symbol,
+                strategy: req.query.strategy,
+                won: req.query.won,
+                from: req.query.from,
+                to: req.query.to,
+            });
+        res.json({ ok: true, count: attribution.length, attribution });
+    } catch (error) {
+        console.error('❌ /api/closed-trades/attribution:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
 
-// Helper to check if dev endpoints are enabled
-const isDevEndpointsEnabled = () => {
-    return process.env.NODE_ENV === 'development' || process.env.ENABLE_DEV_ENDPOINTS === 'true';
-};
+app.get('/api/closed-trades/lifecycle', async (req, res) => {
+    try {
+        const rows = await tradeLifecycleService.loadLifecycleSummaries();
+        const limit = parseInt(req.query.limit || '500', 10);
+        const lifecycles =
+            Number.isFinite(limit) && limit > 0 ? rows.slice(0, limit) : rows;
+        res.json({ ok: true, count: lifecycles.length, lifecycles });
+    } catch (error) {
+        console.error('❌ /api/closed-trades/lifecycle:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// Institutional analytics dashboard (read-only)
+app.get('/api/analytics/overview', async (req, res) => {
+    try {
+        const overview = await analyticsOverviewService.getAnalyticsOverview({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+            outlierLimit: req.query.outlierLimit,
+        });
+        res.json({ ok: true, ...overview });
+    } catch (error) {
+        console.error('❌ /api/analytics/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/analytics/attribution', async (req, res) => {
+    try {
+        const data = await analyticsOverviewService.getAttributionEndpoint({
+            groupBy: req.query.groupBy,
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+        });
+        res.json({ ok: true, ...data });
+    } catch (error) {
+        console.error('❌ /api/analytics/attribution:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/analytics/lifecycle-outliers', async (req, res) => {
+    try {
+        const data = await analyticsOverviewService.getLifecycleOutliersEndpoint({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+            outlierLimit: req.query.outlierLimit,
+        });
+        res.json({ ok: true, ...data });
+    } catch (error) {
+        console.error('❌ /api/analytics/lifecycle-outliers:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/analytics/risk-diagnostics', async (req, res) => {
+    try {
+        const data = await analyticsOverviewService.getRiskDiagnosticsEndpoint({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+        });
+        res.json({ ok: true, ...data });
+    } catch (error) {
+        console.error('❌ /api/analytics/risk-diagnostics:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// Policy application (RL + analytics → durable policy_state_v1.json)
+app.get('/api/policy/overview', async (req, res) => {
+    try {
+        const data = await policyApplicationService.getPolicyOverview();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/policy/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/policy/entities', async (req, res) => {
+    try {
+        const data = await policyApplicationService.getPolicyEntities();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/policy/entities:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/policy/entity', async (req, res) => {
+    try {
+        const data = await policyApplicationService.getPolicyEntity(
+            req.query.entityType,
+            req.query.entityKey
+        );
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/policy/entity:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/policy/run', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const state = await policyApplicationService.runPolicyCycle({
+            from: req.query.from || req.body?.from,
+            to: req.query.to || req.body?.to,
+            symbol: req.query.symbol || req.body?.symbol,
+            strategy: req.query.strategy || req.body?.strategy,
+            limit: req.query.limit || req.body?.limit,
+            outlierLimit: req.query.outlierLimit || req.body?.outlierLimit,
+        });
+        res.json({ ok: true, ...state });
+    } catch (error) {
+        console.error('❌ /api/policy/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// Capital allocation (advisory; from policy_state + analytics)
+app.get('/api/allocation/plan', async (req, res) => {
+    try {
+        const plan = await capitalAllocationService.getCapitalAllocationPlan({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+            outlierLimit: req.query.outlierLimit,
+        });
+        res.json(plan);
+    } catch (error) {
+        console.error('❌ /api/allocation/plan:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/allocation/strategy', async (req, res) => {
+    try {
+        const plan = await capitalAllocationService.getCapitalAllocationPlan({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+        });
+        res.json({
+            ok: plan.ok,
+            generatedAt: plan.generatedAt,
+            cached: plan.cached,
+            strategyAllocations: plan.strategyAllocations,
+            portfolio: plan.portfolio,
+        });
+    } catch (error) {
+        console.error('❌ /api/allocation/strategy:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/allocation/symbol', async (req, res) => {
+    try {
+        const plan = await capitalAllocationService.getCapitalAllocationPlan({
+            from: req.query.from,
+            to: req.query.to,
+            symbol: req.query.symbol,
+            strategy: req.query.strategy,
+            limit: req.query.limit,
+        });
+        res.json({
+            ok: plan.ok,
+            generatedAt: plan.generatedAt,
+            cached: plan.cached,
+            symbolAllocations: plan.symbolAllocations,
+            portfolio: plan.portfolio,
+        });
+    } catch (error) {
+        console.error('❌ /api/allocation/symbol:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/allocation/overview', async (req, res) => {
+    try {
+        const overview = await capitalAllocationService.getAllocationOverview();
+        res.json(overview);
+    } catch (error) {
+        console.error('❌ /api/allocation/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/allocation/history', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '50', 10);
+        const entries = await capitalAllocationService.readAllocationHistory(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/allocation/history:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/allocation/run', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const plan = await capitalAllocationService.getCapitalAllocationPlan({
+            from: req.query.from || req.body?.from,
+            to: req.query.to || req.body?.to,
+            symbol: req.query.symbol || req.body?.symbol,
+            strategy: req.query.strategy || req.body?.strategy,
+            limit: req.query.limit || req.body?.limit,
+            forceHistoryAppend:
+                String(req.query.forceHistory || req.body?.forceHistory || '') === 'true',
+        });
+        res.json({ ok: true, ...plan });
+    } catch (error) {
+        console.error('❌ /api/allocation/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/policy/stability', async (req, res) => {
+    try {
+        const diag =
+            (await policyStabilityService.loadLatestStabilityDiagnostics()) || {
+                ok: false,
+                error: 'no_snapshot',
+            };
+        res.json({ ok: true, diagnostics: diag });
+    } catch (error) {
+        console.error('❌ /api/policy/stability:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/policy/stability/history', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '30', 10);
+        const entries = await policyStabilityService.readStabilityHistory(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/policy/stability/history:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/shadow-allocation/latest', async (req, res) => {
+    try {
+        const rec = await shadowAllocationService.loadLatestShadowAllocationRecord();
+        res.json({ ok: true, record: rec });
+    } catch (error) {
+        console.error('❌ /api/shadow-allocation/latest:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/shadow-allocation/history', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '50', 10);
+        const entries = await shadowAllocationService.readShadowAllocationHistory(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/shadow-allocation/history:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/shadow-allocation/summary', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '200', 10);
+        const rows = await shadowAllocationService.readShadowAllocationHistory(limit);
+        const summary = shadowAllocationService.buildShadowAllocationSummary(rows);
+        res.json({ ok: true, summary });
+    } catch (error) {
+        console.error('❌ /api/shadow-allocation/summary:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// ===== DEV-ONLY DEDUPE ENDPOINTS =====
 
 // Get dedupe stats (dev only)
 app.get('/api/dedupe/stats', (req, res) => {

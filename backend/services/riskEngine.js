@@ -146,11 +146,15 @@ class RiskEngine {
     
     const msUntilMidnight = tomorrow - now;
     
-    setTimeout(async () => {
+    const timeoutId = setTimeout(async () => {
       await this.checkDailyReset();
-      // Schedule next reset (24 hours)
-      setInterval(async () => await this.checkDailyReset(), 24 * 60 * 60 * 1000);
+      const intervalId = setInterval(
+        async () => await this.checkDailyReset(),
+        24 * 60 * 60 * 1000
+      );
+      intervalId.unref();
     }, msUntilMidnight);
+    timeoutId.unref();
   }
 
   /**

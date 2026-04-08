@@ -149,6 +149,52 @@ async function run() {
     assert.ok(k in stats, `missing stat ${k}`);
   }
 
+  // 5) Lifecycle fields on closed row (full group only — partial uses nulls)
+  const lc = {
+    mfe: 2,
+    mae: 0.5,
+    mfePercent: 2,
+    maePercent: 0.5,
+    peakUnrealizedPnL: 20,
+    worstUnrealizedPnL: -5,
+    efficiencyRatio: 0.4,
+    lifecycleDurationSec: 120,
+    lifecycleDurationMin: 2,
+    entryTimestamp: '2026-01-01T00:00:00.000Z',
+    finalExitTimestamp: '2026-01-01T00:02:00.000Z',
+    cumulativeRealizedPnL: 8,
+  };
+  const withLc = closedTradeAnalyticsService.buildClosedTradeRecord({
+    symbol: 'XAUUSD',
+    entryPriceAvg: 100,
+    exitPriceAvg: 102,
+    closedQuantity: 1,
+    realizedPnL: 2,
+    entryTimestamp: '2026-01-01T00:00:00.000Z',
+    exitTimestamp: '2026-01-01T00:02:00.000Z',
+    closeReason: 'CLOSE',
+    lifecycleSummary: lc,
+    regime: 'trend',
+  });
+  assert.strictEqual(withLc.mfe, 2);
+  assert.strictEqual(withLc.groupEntryTimestamp, lc.entryTimestamp);
+  assert.strictEqual(withLc.groupCumulativeRealizedPnL, 8);
+  assert.strictEqual(withLc.regime, 'trend');
+
+  // 6) Performance attribution
+  const attr = closedTradeAnalyticsService.getPerformanceAttribution(trades, {
+    groupBy: ['symbol'],
+  });
+  assert.strictEqual(attr.length, 1);
+  assert.strictEqual(attr[0].trades, 3);
+  assert.ok(typeof attr[0].expectancy === 'number');
+
+  // 7) Weekday attribution dimension
+  const wd = closedTradeAnalyticsService.getPerformanceAttribution(trades, {
+    groupBy: ['weekday'],
+  });
+  assert.ok(wd.length >= 1);
+
   console.log('✅ closedTradeAnalytics tests passed');
 }
 

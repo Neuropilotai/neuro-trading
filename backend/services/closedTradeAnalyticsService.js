@@ -63,6 +63,8 @@ function buildClosedTradeRecord(input) {
     tradeGroupId = null,
     closeSequence = null,
     stopLoss = null,
+    regime = null,
+    lifecycleSummary = null,
   } = input;
 
   const entry = Number(entryPriceAvg);
@@ -98,6 +100,8 @@ function buildClosedTradeRecord(input) {
 
   const tradeCloseId = `close_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
+  const lc = lifecycleSummary && typeof lifecycleSummary === 'object' ? lifecycleSummary : null;
+
   return {
     tradeCloseId,
     symbol: String(symbol || '').toUpperCase().trim(),
@@ -117,6 +121,7 @@ function buildClosedTradeRecord(input) {
     setupId,
     alertId,
     priceSourceAtExit,
+    regime: regime == null ? null : String(regime),
     bookValueClosed,
     marketValueAtExit,
     fees: Number(fees) || 0,
@@ -127,6 +132,18 @@ function buildClosedTradeRecord(input) {
     closedAtHourUTC,
     tradeGroupId: tradeGroupId || null,
     closeSequence: closeSequence == null ? null : Number(closeSequence),
+    mfe: lc ? lc.mfe : null,
+    mae: lc ? lc.mae : null,
+    mfePercent: lc ? lc.mfePercent : null,
+    maePercent: lc ? lc.maePercent : null,
+    peakUnrealizedPnL: lc ? lc.peakUnrealizedPnL : null,
+    worstUnrealizedPnL: lc ? lc.worstUnrealizedPnL : null,
+    efficiencyRatio: lc ? lc.efficiencyRatio : null,
+    lifecycleDurationSec: lc ? lc.lifecycleDurationSec : null,
+    lifecycleDurationMin: lc ? lc.lifecycleDurationMin : null,
+    groupEntryTimestamp: lc ? lc.entryTimestamp : null,
+    groupFinalExitTimestamp: lc ? lc.finalExitTimestamp : null,
+    groupCumulativeRealizedPnL: lc ? lc.cumulativeRealizedPnL : null,
   };
 }
 
@@ -297,6 +314,150 @@ async function getClosedTradeStatsFiltered(options = {}) {
   return getClosedTradeStats(rows);
 }
 
+function _mean(arr) {
+  const a = arr.filter(Number.isFinite);
+  return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+}
+
+function _stdSample(arr) {
+  const a = arr.filter(Number.isFinite);
+  if (a.length < 2) return 0;
+  const m = _mean(a);
+  const v = a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1);
+  return Math.sqrt(v);
+}
+
+function _winLossStreaks(rowsChrono) {
+  let winStreak = 0;
+  let lossStreak = 0;
+  let curW = 0;
+  let curL = 0;
+  for (const t of rowsChrono) {
+    const pnl = Number(t.realizedPnL) || 0;
+    if (pnl > 0) {
+      curW++;
+      curL = 0;
+      winStreak = Math.max(winStreak, curW);
+    } else if (pnl < 0) {
+      curL++;
+      curW = 0;
+      lossStreak = Math.max(lossStreak, curL);
+    } else {
+      curW = 0;
+      curL = 0;
+    }
+  }
+  return { winStreak, lossStreak };
+}
+
+/**
+ * Multi-dimensional attribution over closed-trade rows.
+ * options.groupBy: array of 'symbol' | 'strategy' | 'hourUTC' | 'date' | 'weekday' | 'regime' | 'priceSource'
+ */
+function normalizeAttributionDims(groupBy) {
+  if (!Array.isArray(groupBy) || !groupBy.length) return ['symbol', 'strategy'];
+  return groupBy.map((d) => {
+    const x = String(d || '').trim();
+    if (x === 'hour') return 'hourUTC';
+    if (x === 'day') return 'date';
+    return x;
+  });
+}
+
+function getPerformanceAttribution(trades, options = {}) {
+  const dims = normalizeAttributionDims(options.groupBy);
+  const rows = Array.isArray(trades) ? trades : [];
+
+  function keyOf(t) {
+    return dims
+      .map((d) => {
+        if (d === 'symbol') return String(t.symbol || '').toUpperCase() || 'UNKNOWN';
+        if (d === 'strategy') return t.strategy != null ? String(t.strategy) : 'null';
+        if (d === 'hourUTC')
+          return String(t.closedAtHourUTC != null ? t.closedAtHourUTC : '');
+        if (d === 'date') return String(t.closedAtDate || '');
+        if (d === 'weekday') {
+          const ex = t.exitTimestamp;
+          if (!ex) return '';
+          return String(new Date(ex).getUTCDay());
+        }
+        if (d === 'regime') return t.regime != null ? String(t.regime) : 'unknown';
+        if (d === 'priceSource')
+          return t.priceSourceAtExit != null ? String(t.priceSourceAtExit) : 'unknown';
+        return '';
+      })
+      .join('|');
+  }
+
+  const groups = new Map();
+  for (const t of rows) {
+    const k = keyOf(t);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+
+  const out = [];
+  for (const [groupKey, gRows] of groups) {
+    const stats = getClosedTradeStats(gRows);
+    const pnls = gRows.map((x) => Number(x.realizedPnL) || 0);
+    const mfes = gRows.map((x) => Number(x.mfe)).filter((x) => Number.isFinite(x));
+    const maes = gRows.map((x) => Number(x.mae)).filter((x) => Number.isFinite(x));
+    const effs = gRows
+      .map((x) => Number(x.efficiencyRatio))
+      .filter((x) => Number.isFinite(x));
+    const holds = gRows.map((x) => Number(x.holdingTimeSec) || 0);
+
+    const wins = gRows.filter((x) => (Number(x.realizedPnL) || 0) > 0);
+    const losses = gRows.filter((x) => (Number(x.realizedPnL) || 0) < 0);
+    const wrDec = stats.count > 0 ? wins.length / stats.count : 0;
+    const avgWin = wins.length ? _mean(wins.map((x) => Number(x.realizedPnL))) : 0;
+    const avgLoss = losses.length ? _mean(losses.map((x) => Number(x.realizedPnL))) : 0;
+    const lossMag = losses.length ? Math.abs(avgLoss) : 0;
+    const expectancy =
+      wrDec * avgWin - (1 - wrDec) * lossMag;
+
+    const payoffRatio =
+      losses.length && avgWin !== 0 && lossMag > 0 ? avgWin / lossMag : null;
+
+    const sig = _stdSample(pnls);
+    const sharpeProxy = sig > 1e-12 ? _mean(pnls) / sig : null;
+
+    const chrono = [...gRows].sort((a, b) =>
+      String(a.exitTimestamp || '').localeCompare(String(b.exitTimestamp || ''))
+    );
+    const streaks = _winLossStreaks(chrono);
+
+    out.push({
+      groupKey,
+      dimensions: dims,
+      trades: stats.count,
+      winRate: stats.winRate,
+      winRateDecimal: Math.round(wrDec * 1e4) / 1e4,
+      totalPnL: stats.totalRealizedPnL,
+      avgPnL: stats.count > 0 ? stats.totalRealizedPnL / stats.count : 0,
+      expectancy: Math.round(expectancy * 1e6) / 1e6,
+      profitFactor: stats.profitFactor,
+      avgMFE: mfes.length ? Math.round(_mean(mfes) * 1e6) / 1e6 : null,
+      avgMAE: maes.length ? Math.round(_mean(maes) * 1e6) / 1e6 : null,
+      avgHoldingTimeSec: holds.length ? Math.round(_mean(holds)) : 0,
+      avgEfficiencyRatio: effs.length ? Math.round(_mean(effs) * 1e4) / 1e4 : null,
+      payoffRatio: payoffRatio != null ? Math.round(payoffRatio * 100) / 100 : null,
+      sharpeProxy: sharpeProxy != null ? Math.round(sharpeProxy * 100) / 100 : null,
+      winStreak: streaks.winStreak,
+      lossStreak: streaks.lossStreak,
+    });
+  }
+
+  out.sort((a, b) => Math.abs(b.totalPnL) - Math.abs(a.totalPnL));
+  return out;
+}
+
+async function getPerformanceAttributionFiltered(options = {}) {
+  const { groupBy, ...listOpts } = options;
+  const rows = await listClosedTrades(listOpts);
+  return getPerformanceAttribution(rows, { groupBy });
+}
+
 module.exports = {
   isEnabled,
   getClosedTradesPath,
@@ -307,6 +468,8 @@ module.exports = {
   getRecentClosedTrades,
   getClosedTradeStats,
   getClosedTradeStatsFiltered,
+  getPerformanceAttribution,
+  getPerformanceAttributionFiltered,
   filterTrades,
   CLOSE_REASONS,
 };
