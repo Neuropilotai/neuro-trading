@@ -45,6 +45,7 @@ async function run() {
   }
 
   console.log('✅ postClosedTradeLearningPolicyHook tests passed');
+  process.exit(0);
 }
 
 run().catch((e) => {

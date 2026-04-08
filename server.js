@@ -42,6 +42,8 @@ const capitalAllocationService = require('./backend/services/capitalAllocationSe
 const policyStabilityService = require('./backend/services/policyStabilityService');
 const shadowAllocationService = require('./backend/services/shadowAllocationService');
 const correlationOverlapService = require('./backend/services/correlationOverlapService');
+const autonomousEntryEngine = require('./backend/services/autonomousEntryEngine');
+const autonomousExecutionCoordinator = require('./backend/services/autonomousExecutionCoordinator');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
@@ -1168,6 +1170,109 @@ app.post('/api/overlap/run', async (req, res) => {
         res.json({ ok: true, summary: state.summary, warnings: state.warnings });
     } catch (error) {
         console.error('❌ /api/overlap/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/autonomous/status', async (req, res) => {
+    try {
+        res.json({ ok: true, status: autonomousEntryEngine.getStatus() });
+    } catch (error) {
+        console.error('❌ /api/autonomous/status:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/autonomous/latest', async (req, res) => {
+    try {
+        const latest = await autonomousExecutionCoordinator.loadLatestAutonomousEntry();
+        res.json({ ok: true, latest });
+    } catch (error) {
+        console.error('❌ /api/autonomous/latest:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/autonomous/history', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '100', 10);
+        const entries = await autonomousExecutionCoordinator.readAutonomousEntryHistory(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/autonomous/history:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/autonomous/rejections', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '100', 10);
+        const entries = await autonomousExecutionCoordinator.getAutonomousRejections(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/autonomous/rejections:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/autonomous/open-positions', async (req, res) => {
+    try {
+        const positions = paperTradingService.getAutonomousOpenPositions();
+        res.json({ ok: true, count: positions.length, positions });
+    } catch (error) {
+        console.error('❌ /api/autonomous/open-positions:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/autonomous/run-scan', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const cycle = await autonomousEntryEngine.runScanCycle();
+        res.json({ ok: true, cycle });
+    } catch (error) {
+        console.error('❌ /api/autonomous/run-scan:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/autonomous/run-exits', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const cycle = await autonomousEntryEngine.runExitCycle();
+        res.json({ ok: true, cycle });
+    } catch (error) {
+        console.error('❌ /api/autonomous/run-exits:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/autonomous/start', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const status = await autonomousEntryEngine.start();
+        res.json({ ok: true, status });
+    } catch (error) {
+        console.error('❌ /api/autonomous/start:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/autonomous/stop', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const status = await autonomousEntryEngine.stop();
+        res.json({ ok: true, status });
+    } catch (error) {
+        console.error('❌ /api/autonomous/stop:', error.message);
         res.status(500).json({ ok: false, error: error.message });
     }
 });
@@ -2419,6 +2524,18 @@ function startServer() {
     
     console.log(`📊 Paper Trading: ${process.env.ENABLE_PAPER_TRADING !== 'false' ? 'ENABLED' : 'DISABLED'}`);
     console.log(`🧠 Learning: ${tradingLearningService.enabled ? 'ENABLED' : 'DISABLED'}`);
+    console.log(
+        `🧭 Autonomous Entry Engine: ${
+            String(process.env.ENABLE_AUTONOMOUS_ENTRY_ENGINE || 'false').toLowerCase() === 'true'
+                ? 'ENABLED'
+                : 'DISABLED'
+        } (paper only)`
+    );
+    console.log(
+        `   scan=${process.env.AUTO_ENTRY_SCAN_INTERVAL_SECONDS || '60'}s exit=${
+            process.env.AUTO_EXIT_SCAN_INTERVAL_SECONDS || '30'
+        }s symbols=${process.env.AUTO_ENTRY_SYMBOLS || 'XAUUSD,EURUSD'}`
+    );
     console.log(`🎯 Indicator Generation: ${indicatorGenerator.enabled ? 'ENABLED' : 'DISABLED'} (${indicatorGenerator.tradingStyle})`);
     console.log(`🤖 Automated Trading: ${automatedScalpingTrader.enabled ? 'ENABLED' : 'DISABLED'}`);
     // Initialize whale detection agent
@@ -2466,6 +2583,15 @@ function startServer() {
         console.log(`📊 Pattern Recognition: Loaded ${patternRecognitionService.patterns.size} patterns`);
     } catch (error) {
         console.warn(`⚠️  Pattern loading failed: ${error.message}`);
+    }
+
+    if (String(process.env.ENABLE_AUTONOMOUS_ENTRY_ENGINE || 'false').toLowerCase() === 'true') {
+        try {
+            await autonomousEntryEngine.start();
+            console.log(`✅ Autonomous entry engine started`);
+        } catch (error) {
+            console.warn(`⚠️  Autonomous entry engine start failed: ${error.message}`);
+        }
     }
     });
 }

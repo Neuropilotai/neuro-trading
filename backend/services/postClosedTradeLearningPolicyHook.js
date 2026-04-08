@@ -37,6 +37,7 @@ async function runLearningThenPolicy() {
     const pol = await policyApplicationService.runPolicyCycle({});
     const n = Array.isArray(pol?.entities) ? pol.entities.length : 0;
     console.log(`[closed-trade→policy] ok policyEntities=${n}`);
+    console.log('[closed-trade→allocation-refresh] completed via runPolicyCycle');
   } catch (e) {
     console.warn(`[closed-trade→policy] runPolicyCycle: ${e && e.message}`);
   }

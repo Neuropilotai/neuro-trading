@@ -226,6 +226,22 @@ class PaperTradingService extends EventEmitter {
       takeProfit,
       tradeGroupId,
       closeSequence: existingPosition.closeSequence || 0,
+      autonomousTag:
+        orderIntent && (orderIntent.autonomousTag === true || orderIntent.actionSource === 'autonomous_entry_engine'),
+      autonomousStrategy:
+        orderIntent && orderIntent.autonomousTag ? String(orderIntent.strategy || '') : existingPosition.autonomousStrategy || null,
+      autonomousCandidateId:
+        orderIntent && orderIntent.autonomousTag ? orderIntent.autonomousCandidateId || null : existingPosition.autonomousCandidateId || null,
+      autonomousSetupType:
+        orderIntent && orderIntent.autonomousTag ? orderIntent.autonomousSetupType || null : existingPosition.autonomousSetupType || null,
+      autonomousMetadata:
+        orderIntent && orderIntent.autonomousTag
+          ? (orderIntent.metadata && typeof orderIntent.metadata === 'object' ? orderIntent.metadata : {})
+          : existingPosition.autonomousMetadata || null,
+      maxHoldingMinutes:
+        orderIntent && orderIntent.autonomousTag
+          ? Number(orderIntent.maxHoldingMinutes) || null
+          : existingPosition.maxHoldingMinutes || null,
     });
 
     try {
@@ -499,6 +515,18 @@ class PaperTradingService extends EventEmitter {
         bookValue,
         marketValue,
         unrealizedPnL,
+        stopLoss: pos.stopLoss != null ? Number(pos.stopLoss) : null,
+        takeProfit: pos.takeProfit != null ? Number(pos.takeProfit) : null,
+        entryTime: pos.entryTime || null,
+        autonomousTag: pos.autonomousTag === true,
+        autonomousStrategy: pos.autonomousStrategy || null,
+        autonomousCandidateId: pos.autonomousCandidateId || null,
+        autonomousSetupType: pos.autonomousSetupType || null,
+        autonomousMetadata:
+          pos.autonomousMetadata && typeof pos.autonomousMetadata === 'object'
+            ? pos.autonomousMetadata
+            : null,
+        maxHoldingMinutes: pos.maxHoldingMinutes != null ? Number(pos.maxHoldingMinutes) : null,
       };
     });
 
@@ -794,6 +822,12 @@ class PaperTradingService extends EventEmitter {
   resetDailyPnL() {
     this.account.dailyPnL = 0;
     console.log('📅 Daily PnL reset');
+  }
+
+  getAutonomousOpenPositions() {
+    const summary = this.getAccountSummary();
+    const positions = Array.isArray(summary.positions) ? summary.positions : [];
+    return positions.filter((p) => p.autonomousTag === true);
   }
 }
 
