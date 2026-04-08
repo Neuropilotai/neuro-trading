@@ -66,6 +66,7 @@ const {
   createEmergencyStopEndpoint,
 } = require('./backend/services/webhookIntegration');
 const { isChampionAllowed } = require('./engine/champions/executionGate');
+const operatorOverviewService = require('./backend/services/operatorOverviewService');
 
 const app = express();
 // Support both PORT (standard) and WEBHOOK_PORT (legacy) for consistency
@@ -664,6 +665,17 @@ app.get('/health', async (req, res) => {
 app.get('/health/execution', createHealthCheckEndpoint());
 app.get('/status/execution', createStatusEndpoint());
 app.post('/emergency-stop', createEmergencyStopEndpoint());
+
+// Operator dashboard aggregate (read-only; per-section fail-soft)
+app.get('/api/operator/overview', async (req, res) => {
+    try {
+        const data = await operatorOverviewService.buildOperatorOverview();
+        res.json({ ok: true, ...data });
+    } catch (error) {
+        console.error('❌ /api/operator/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
 
 // Account summary endpoint
 app.get('/api/account', async (req, res) => {
@@ -2372,6 +2384,11 @@ app.get('/trading_dashboard.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'ops-dashboard', 'trading_dashboard.html'));
 });
 
+// Unified operator console (paper-first)
+app.get(['/operator', '/operator_dashboard.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'operator_dashboard.html'));
+});
+
 // Serve trading system monitor
 app.get('/monitor', (req, res) => {
     res.sendFile(path.join(__dirname, 'trading_system_monitor.html'));
@@ -2423,6 +2440,7 @@ app.get('/', (req, res) => {
             health: `http://localhost:${port}/health`,
             debug_routes: `http://localhost:${port}/debug/routes`,
             dashboard: `http://localhost:${port}/trading_dashboard.html`,
+            operator_dashboard: `http://localhost:${port}/operator`,
             account: `http://localhost:${port}/api/account`,
             learning: `http://localhost:${port}/api/learning`
         }

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NeuroPilot — Operator Console</title>
+    <link rel="stylesheet" href="/public/operator_dashboard.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>NeuroPilot Operator Console</h1>
+      <span class="meta">Paper-first · governance · autonomous · security</span>
+      <span class="meta" id="lastUpdated">—</span>
+      <span class="meta">Overview snapshot: <span id="overviewTs">—</span></span>
+      <div class="controls">
+        <input type="password" id="tokenInput" placeholder="Operator Bearer token (memory)" autocomplete="off" />
+        <button type="button" id="saveToken">Save token</button>
+        <button type="button" class="primary" id="manualRefresh">Refresh now</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>SECTION A — System overview</h2>
+        <div class="body" id="sectionA"><div class="hint">Loading…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2>SECTION B — Autonomous entry engine</h2>
+        <div class="body" id="sectionB"><div class="hint">Loading…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2>SECTION C — Portfolio governance</h2>
+        <div class="body" id="sectionC"><div class="hint">Loading…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2>SECTION D — Positions / shadow / autonomous activity</h2>
+        <div class="body" id="sectionD"><div class="hint">Loading…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2>SECTION E — Security &amp; audit</h2>
+        <div class="body" id="sectionE"><div class="hint">Loading…</div></div>
+      </section>
+
+      <section class="panel">
+        <h2>SECTION F — Operator actions</h2>
+        <div class="body" id="sectionF"><div class="hint">Prepare controls…</div></div>
+      </section>
+
+      <p class="hint">
+        Auto-refresh every 12s · Data: <code>/api/operator/overview</code> plus detail endpoints · Token stored in
+        <code>localStorage</code> only for this origin.
+      </p>
+    </main>
+
+    <script src="/public/operator_dashboard.js"></script>
+  </body>
+</html>
