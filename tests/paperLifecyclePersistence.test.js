@@ -168,6 +168,100 @@ async function run() {
   assert.ok(closeLeg, 'CLOSE fill should have FILLED ledger row');
   assert.strictEqual(String(closeLeg.action).toUpperCase(), 'CLOSE');
 
+  // 2d) Autonomous identity survives rebuild from ledger metadata (FILLED BUY)
+  await tradeLedger.close();
+  try {
+    fs.unlinkSync(process.env.LEDGER_DB_PATH);
+  } catch (e) {
+    /* ignore */
+  }
+  tradeLedger.db = null;
+  await tradeLedger.initialize();
+  paperTradingService.resetToInitialState();
+  paperTradingService.account.balance = 10000;
+  paperTradingService.account.initialBalance = 10000;
+
+  const symAuto = 'AUTSYM';
+  const metaTid = `TRADE_AUTO_META_${Date.now()}`;
+  const autonomousMeta = {
+    autonomousTag: true,
+    autonomousStrategy: 'auto-pullback-v1',
+    autonomousCandidateId: 'cand_123',
+    autonomousSetupType: 'trend_pullback',
+    autonomousMetadata: { source: 'autonomous_entry_engine', candidateId: 'cand_123' },
+    maxHoldingMinutes: 45,
+  };
+  await tradeLedger.insertTrade({
+    trade_id: metaTid,
+    idempotency_key: `id_${metaTid}`,
+    symbol: symAuto,
+    action: 'BUY',
+    quantity: 1,
+    price: 100,
+    status: 'PENDING',
+    metadata: autonomousMeta,
+  });
+  const tsMeta = new Date().toISOString();
+  await tradeLedger.updateTradeStatus(metaTid, 'EXECUTED', { executed_at: tsMeta, pnl: 0 });
+  await tradeLedger.updateTradeStatus(metaTid, 'FILLED', { filled_at: tsMeta, pnl: 0 });
+
+  const rebuiltMeta = await paperTradingService.rebuildStateFromLedger();
+  assert.strictEqual(rebuiltMeta, true);
+  const pos = paperTradingService.account.positions.get(symAuto);
+  assert.ok(pos, 'rebuilt position exists');
+  assert.strictEqual(pos.autonomousTag, true);
+  assert.strictEqual(pos.autonomousStrategy, 'auto-pullback-v1');
+  assert.strictEqual(pos.autonomousCandidateId, 'cand_123');
+  assert.strictEqual(pos.autonomousSetupType, 'trend_pullback');
+  assert.deepStrictEqual(pos.autonomousMetadata, autonomousMeta.autonomousMetadata);
+  assert.strictEqual(pos.maxHoldingMinutes, 45);
+
+  const autonomousOpen = paperTradingService.getAutonomousOpenPositions();
+  assert.strictEqual(autonomousOpen.length, 1);
+  assert.strictEqual(autonomousOpen[0].symbol, symAuto);
+
+  // 2e) Malformed ledger metadata: rebuild must not throw; financial leg preserved
+  await tradeLedger.close();
+  try {
+    fs.unlinkSync(process.env.LEDGER_DB_PATH);
+  } catch (e) {
+    /* ignore */
+  }
+  tradeLedger.db = null;
+  await tradeLedger.initialize();
+  paperTradingService.resetToInitialState();
+  paperTradingService.account.balance = 10000;
+  paperTradingService.account.initialBalance = 10000;
+
+  const badTid = `TRADE_BAD_META_${Date.now()}`;
+  await tradeLedger.insertTrade({
+    trade_id: badTid,
+    idempotency_key: `id_${badTid}`,
+    symbol: 'BADSYM',
+    action: 'BUY',
+    quantity: 1,
+    price: 50,
+    status: 'PENDING',
+    metadata: { placeholder: true },
+  });
+  await tradeLedger.updateTradeStatus(badTid, 'EXECUTED', { executed_at: tsMeta, pnl: 0 });
+  await tradeLedger.updateTradeStatus(badTid, 'FILLED', { filled_at: tsMeta, pnl: 0 });
+
+  await new Promise((resolve, reject) => {
+    tradeLedger.db.run(
+      'UPDATE trades SET metadata = ? WHERE trade_id = ?',
+      ['{not valid json', badTid],
+      (err) => (err ? reject(err) : resolve())
+    );
+  });
+
+  const rebuiltBad = await paperTradingService.rebuildStateFromLedger();
+  assert.strictEqual(rebuiltBad, true);
+  const posBad = paperTradingService.account.positions.get('BADSYM');
+  assert.ok(posBad);
+  assert.strictEqual(posBad.quantity, 1);
+  assert.ok(!posBad.autonomousTag);
+
   // 3) Empty FILLED ledger: do not reset account; load durable JSON when present
   paperTradingService.resetToInitialState();
   await tradeLedger.close();

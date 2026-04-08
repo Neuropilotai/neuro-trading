@@ -259,7 +259,19 @@ app.post('/webhook/tradingview',
                     bosDirection: bosMetrics.bosDirection,
                     barsSinceCHOCH: bosMetrics.barsSinceCHOCH,
                     cooldownRequired: bosMetrics.cooldownRequired
-                } : null
+                } : null,
+                autonomousTag: orderIntent.autonomousTag === true,
+                autonomousStrategy: orderIntent.autonomousTag === true ? String(orderIntent.strategy || '') : null,
+                autonomousCandidateId: orderIntent.autonomousTag === true ? orderIntent.autonomousCandidateId || null : null,
+                autonomousSetupType: orderIntent.autonomousTag === true ? orderIntent.autonomousSetupType || null : null,
+                autonomousMetadata:
+                    orderIntent.autonomousTag === true && orderIntent.metadata && typeof orderIntent.metadata === 'object'
+                        ? orderIntent.metadata
+                        : null,
+                maxHoldingMinutes:
+                    orderIntent.autonomousTag === true && Number.isFinite(Number(orderIntent.maxHoldingMinutes))
+                        ? Number(orderIntent.maxHoldingMinutes)
+                        : null
             }
         };
         

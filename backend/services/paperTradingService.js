@@ -110,6 +110,17 @@ class PaperTradingService extends EventEmitter {
         metadata: {
           source: orderIntent.actionSource || 'paper_trading',
           autonomousTag: orderIntent.autonomousTag === true,
+          autonomousStrategy: orderIntent.autonomousTag === true ? String(orderIntent.strategy || '') : null,
+          autonomousCandidateId: orderIntent.autonomousTag === true ? orderIntent.autonomousCandidateId || null : null,
+          autonomousSetupType: orderIntent.autonomousTag === true ? orderIntent.autonomousSetupType || null : null,
+          autonomousMetadata:
+            orderIntent.autonomousTag === true && orderIntent.metadata && typeof orderIntent.metadata === 'object'
+              ? orderIntent.metadata
+              : null,
+          maxHoldingMinutes:
+            orderIntent.autonomousTag === true && Number.isFinite(Number(orderIntent.maxHoldingMinutes))
+              ? Number(orderIntent.maxHoldingMinutes)
+              : null,
         },
       });
       console.log(
@@ -1001,6 +1012,33 @@ class PaperTradingService extends EventEmitter {
             entryTime: null
           };
 
+          let parsedMetadata = null;
+          try {
+            parsedMetadata =
+              trade.metadata && typeof trade.metadata === 'string'
+                ? JSON.parse(trade.metadata)
+                : trade.metadata && typeof trade.metadata === 'object'
+                  ? trade.metadata
+                  : null;
+          } catch (_) {
+            parsedMetadata = null;
+          }
+
+          const autonomousTag = parsedMetadata && parsedMetadata.autonomousTag === true;
+          const autonomousStrategy = autonomousTag ? parsedMetadata.autonomousStrategy || null : null;
+          const autonomousCandidateId = autonomousTag ? parsedMetadata.autonomousCandidateId || null : null;
+          const autonomousSetupType = autonomousTag ? parsedMetadata.autonomousSetupType || null : null;
+          const autonomousMetadata =
+            autonomousTag &&
+            parsedMetadata.autonomousMetadata &&
+            typeof parsedMetadata.autonomousMetadata === 'object'
+              ? parsedMetadata.autonomousMetadata
+              : null;
+          const maxHoldingMinutes =
+            autonomousTag && Number.isFinite(Number(parsedMetadata.maxHoldingMinutes))
+              ? Number(parsedMetadata.maxHoldingMinutes)
+              : null;
+
           // Calculate new average price
           const cost = quantity * price;
           const newQuantity = existingPosition.quantity + quantity;
@@ -1018,6 +1056,12 @@ class PaperTradingService extends EventEmitter {
             takeProfit: trade.take_profit || null,
             entryFriction: { spread: 0, slippage: 0, fee: 0, impact: 0 },
             accumulatedEntryExecutionCost: 0,
+            autonomousTag: autonomousTag || existingPosition.autonomousTag === true,
+            autonomousStrategy: autonomousStrategy || existingPosition.autonomousStrategy || null,
+            autonomousCandidateId: autonomousCandidateId || existingPosition.autonomousCandidateId || null,
+            autonomousSetupType: autonomousSetupType || existingPosition.autonomousSetupType || null,
+            autonomousMetadata: autonomousMetadata || existingPosition.autonomousMetadata || null,
+            maxHoldingMinutes: maxHoldingMinutes || existingPosition.maxHoldingMinutes || null,
           });
 
           // Deduct from balance
