@@ -151,6 +151,7 @@ function buildShadowAllocationDecision(input) {
     policyState,
     accountSnapshot,
     metadata,
+    correlationOverlapState,
   } = input || {};
 
   const td = tradeDecision || tradeCandidate || {};
@@ -165,6 +166,55 @@ function buildShadowAllocationDecision(input) {
   const slice = getRecommendedSliceForDecision(allocationPlan, strategy, symbol);
   const stratPol = strategy ? policyRowFor(policyState, 'strategy', strategy) : null;
   const symPol = symbol ? policyRowFor(policyState, 'symbol', symbol) : null;
+
+  let overlapScoreAtDecision = null;
+  let crowdingScoreAtDecision = null;
+  let crowdedClusterAtDecision = null;
+  let duplicateEdgeAtDecision = false;
+  let crowdingRiskLevelAtDecision = 'low';
+  let crowdingAdjustedRecommendedCapital = null;
+  const crowdingReasons = [];
+  const ov = correlationOverlapState && typeof correlationOverlapState === 'object' ? correlationOverlapState : null;
+  if (ov) {
+    try {
+      const cos = require('./correlationOverlapService');
+      const idx = cos.buildEntityCrowdingIndex(ov);
+      const ks = strategy ? `strategy|${strategy}` : null;
+      const ky = symbol ? `symbol|${symbol}` : null;
+      const os = ks ? idx.get(ks) : null;
+      const oy = ky ? idx.get(ky) : null;
+      overlapScoreAtDecision = round4(
+        Math.max(os?.overlapScore || 0, oy?.overlapScore || 0)
+      );
+      crowdingScoreAtDecision = round4(
+        Math.max(os?.crowdingScore || 0, oy?.crowdingScore || 0)
+      );
+      if ((os?.reasons || []).length) crowdingReasons.push(...(os.reasons || []).slice(0, 4));
+      if ((oy?.reasons || []).length) crowdingReasons.push(...(oy.reasons || []).slice(0, 4));
+      crowdedClusterAtDecision =
+        (ov.crowdingDiagnostics?.topCrowdedClusters || []).find((c) =>
+          (c.memberKeys || []).some(
+            (mk) =>
+              (ks && mk === ks) ||
+              (ky && mk === ky) ||
+              (ks && ky && mk.includes(strategy) && mk.includes(symbol))
+          )
+        )?.clusterKey || null;
+      duplicateEdgeAtDecision =
+        (Number(ov.overlapDiagnostics?.duplicateExpressionCount) || 0) >= 2;
+      crowdingRiskLevelAtDecision = cos.crowdingRiskLevelFromScore(
+        Math.max(overlapScoreAtDecision, crowdingScoreAtDecision)
+      );
+    } catch (e) {
+      void e;
+    }
+  }
+  const multCrowd =
+    stratPol && stratPol.overlapPenaltyMultiplier != null
+      ? Number(stratPol.overlapPenaltyMultiplier)
+      : symPol && symPol.overlapPenaltyMultiplier != null
+        ? Number(symPol.overlapPenaltyMultiplier)
+        : 1;
 
   const policyEligible =
     stratPol && symPol
@@ -221,6 +271,43 @@ function buildShadowAllocationDecision(input) {
     } else {
       advisoryStatus = 'underweight';
     }
+
+    const totalCrowd = Number(ov?.crowdingDiagnostics?.totalCrowdingScore) || 0;
+    if (
+      advisoryStatus === 'aligned' &&
+      totalCrowd >= parseFloat(process.env.CROWDING_WARN_THRESHOLD || '0.35') &&
+      (overlapScoreAtDecision || 0) >= 0.25
+    ) {
+      advisoryStatus = 'crowded_but_within_bounds';
+      reasons.push('portfolio_crowding_elevated');
+    }
+    if (
+      duplicateEdgeAtDecision &&
+      strategy &&
+      symbol &&
+      (advisoryStatus === 'aligned' || advisoryStatus === 'crowded_but_within_bounds')
+    ) {
+      advisoryStatus = 'duplicate_edge_expression';
+      reasons.push('duplicate_edge_cluster');
+    }
+    if (
+      (crowdingRiskLevelAtDecision === 'high' || crowdingRiskLevelAtDecision === 'severe') &&
+      advisoryStatus === 'slight_overweight'
+    ) {
+      advisoryStatus = 'crowded_overweight';
+      reasons.push('crowding_amplifies_overweight');
+    }
+    if (
+      (ov?.crowdingDiagnostics?.falseDiversificationScore || 0) > 0.5 &&
+      (advisoryStatus === 'aligned' || advisoryStatus === 'crowded_but_within_bounds')
+    ) {
+      advisoryStatus = 'false_diversification_detected';
+      reasons.push('false_diversification');
+    }
+  }
+
+  if (rec != null && rec > 0 && Number.isFinite(multCrowd)) {
+    crowdingAdjustedRecommendedCapital = round4(rec * multCrowd);
   }
 
   return {
@@ -249,6 +336,13 @@ function buildShadowAllocationDecision(input) {
     portfolioRiskMode: mode,
     reasons,
     metadata: metadata && typeof metadata === 'object' ? metadata : {},
+    overlapScoreAtDecision,
+    crowdingScoreAtDecision,
+    crowdedClusterAtDecision,
+    duplicateEdgeAtDecision,
+    crowdingRiskLevelAtDecision,
+    crowdingAdjustedRecommendedCapital,
+    crowdingReasons: [...new Set(crowdingReasons)].slice(0, 12),
   };
 }
 
@@ -286,6 +380,13 @@ function buildShadowAllocationRecord(input) {
     withinRecommendedBand: d.withinRecommendedBand,
     reasons: d.reasons,
     metadata: d.metadata,
+    overlapScoreAtDecision: d.overlapScoreAtDecision,
+    crowdingScoreAtDecision: d.crowdingScoreAtDecision,
+    crowdedClusterAtDecision: d.crowdedClusterAtDecision,
+    duplicateEdgeAtDecision: d.duplicateEdgeAtDecision,
+    crowdingRiskLevelAtDecision: d.crowdingRiskLevelAtDecision,
+    crowdingAdjustedRecommendedCapital: d.crowdingAdjustedRecommendedCapital,
+    crowdingReasons: d.crowdingReasons,
   };
 }
 
@@ -458,6 +559,13 @@ async function logShadowAfterPaperExecution(ctx) {
     skipAllocationPersistence: true,
   });
 
+  let correlationOverlapState = {};
+  try {
+    correlationOverlapState = await require('./correlationOverlapService').loadLatestCorrelationOverlapState();
+  } catch (e) {
+    correlationOverlapState = {};
+  }
+
   let accountSnapshot = null;
   try {
     const paper = require('./paperTradingService');
@@ -488,6 +596,7 @@ async function logShadowAfterPaperExecution(ctx) {
     tradeDecision,
     allocationPlan,
     policyState,
+    correlationOverlapState,
     accountSnapshot,
     metadata: {
       source: 'paperTradingService',

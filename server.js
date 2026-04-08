@@ -41,6 +41,7 @@ const policyApplicationService = require('./backend/services/policyApplicationSe
 const capitalAllocationService = require('./backend/services/capitalAllocationService');
 const policyStabilityService = require('./backend/services/policyStabilityService');
 const shadowAllocationService = require('./backend/services/shadowAllocationService');
+const correlationOverlapService = require('./backend/services/correlationOverlapService');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
 const patternLearningAgents = require('./backend/services/patternLearningAgents');
@@ -1093,6 +1094,80 @@ app.get('/api/shadow-allocation/summary', async (req, res) => {
         res.json({ ok: true, summary });
     } catch (error) {
         console.error('❌ /api/shadow-allocation/summary:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/overlap/overview', async (req, res) => {
+    try {
+        const overview = await correlationOverlapService.getCorrelationOverlapOverview();
+        res.json(overview);
+    } catch (error) {
+        console.error('❌ /api/overlap/overview:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/overlap/matrix', async (req, res) => {
+    try {
+        const data = await correlationOverlapService.getCorrelationOverlapMatrix();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/overlap/matrix:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/overlap/clusters', async (req, res) => {
+    try {
+        const data = await correlationOverlapService.getCorrelationOverlapClusters();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/overlap/clusters:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/overlap/history', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '50', 10);
+        const entries = await correlationOverlapService.readCorrelationOverlapHistory(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/overlap/history:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/overlap/warnings', async (req, res) => {
+    try {
+        const data = await correlationOverlapService.getCorrelationOverlapWarnings();
+        res.json(data);
+    } catch (error) {
+        console.error('❌ /api/overlap/warnings:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/overlap/run', async (req, res) => {
+    if (!isDevEndpointsEnabled()) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+    try {
+        const policyState = await policyApplicationService.loadPolicyState();
+        let allocationPlan = {};
+        try {
+            allocationPlan = await capitalAllocationService.loadLatestAllocationPlan();
+        } catch (e) {
+            allocationPlan = {};
+        }
+        const state = await correlationOverlapService.runCorrelationOverlapCycle({
+            policyState,
+            allocationPlan,
+        });
+        res.json({ ok: true, summary: state.summary, warnings: state.warnings });
+    } catch (error) {
+        console.error('❌ /api/overlap/run:', error.message);
         res.status(500).json({ ok: false, error: error.message });
     }
 });

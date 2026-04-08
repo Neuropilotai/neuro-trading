@@ -546,8 +546,31 @@ async function buildCapitalAllocationPlan(options = {}) {
     persistenceMode: options.skipAllocationPersistence ? 'shadow_no_persist' : 'standard',
   });
 
-  _lastPlan = enriched;
-  return enriched;
+  let finalPlan = enriched;
+  try {
+    const cos = require('./correlationOverlapService');
+    const ov =
+      options.correlationOverlapState && options.correlationOverlapState.generatedAt
+        ? options.correlationOverlapState
+        : await cos.loadLatestCorrelationOverlapState();
+    if (ov && ov.summary && ov.crowdingDiagnostics) {
+      const { plan: capped, crowdingAdjusted } = cos.applyCrowdingCaps(enriched, ov);
+      if (crowdingAdjusted) {
+        finalPlan = enrichPlan(capped, policyState, {
+          cacheHit: false,
+          persistenceMode: options.skipAllocationPersistence ? 'shadow_no_persist' : 'standard',
+        });
+        const impact = cos.summarizeAllocationOverlapImpact(enriched, finalPlan);
+        finalPlan.topOverlappingStrategies = impact.topOverlappingStrategies;
+        finalPlan.topOverlappingSymbols = impact.topOverlappingSymbols;
+      }
+    }
+  } catch (e) {
+    console.warn(`[allocation] crowding caps: ${e.message}`);
+  }
+
+  _lastPlan = finalPlan;
+  return finalPlan;
 }
 
 async function getCapitalAllocationPlan(options = {}) {
@@ -598,6 +621,10 @@ async function getAllocationOverview() {
     allocationWarnings: full.diagnostics?.allocationWarnings || [],
     bindingReadinessScore: full.bindingReadinessScore,
     capitalEfficiencyScore: full.capitalEfficiencyScore,
+    crowdingAdjusted: full.diagnostics?.crowdingAdjusted ?? false,
+    crowdingWeightLoss: full.diagnostics?.crowdingWeightLoss ?? null,
+    overlapWarnings: full.diagnostics?.overlapWarnings || [],
+    crowdingWarnings: full.diagnostics?.crowdingWarnings || [],
   };
 }
 

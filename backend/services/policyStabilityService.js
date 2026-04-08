@@ -95,12 +95,16 @@ function rankChanges(wPrev, wCur, topN = 5) {
  * @param {object} previousPolicyState
  * @param {object} currentAllocationPlan
  * @param {object} previousAllocationPlan
+ * @param {object} [previousCorrelationOverlap]
+ * @param {object} [currentCorrelationOverlap]
  */
 function buildPolicyStabilityDiagnostics(
   currentPolicyState,
   previousPolicyState,
   currentAllocationPlan,
-  previousAllocationPlan
+  previousAllocationPlan,
+  previousCorrelationOverlap,
+  currentCorrelationOverlap
 ) {
   const generatedAt = new Date().toISOString();
   const curP = currentPolicyState && typeof currentPolicyState === 'object' ? currentPolicyState : {};
@@ -271,6 +275,90 @@ function buildPolicyStabilityDiagnostics(
   );
   if (!lookbackAvailable) overallStabilityScore = null;
 
+  const prevO =
+    previousCorrelationOverlap && typeof previousCorrelationOverlap === 'object'
+      ? previousCorrelationOverlap
+      : {};
+  const curO =
+    currentCorrelationOverlap && typeof currentCorrelationOverlap === 'object'
+      ? currentCorrelationOverlap
+      : {};
+  const prevCrowd = Number(prevO.crowdingDiagnostics?.totalCrowdingScore);
+  const curCrowd = Number(curO.crowdingDiagnostics?.totalCrowdingScore);
+  const crowdingScoreChange =
+    Number.isFinite(prevCrowd) && Number.isFinite(curCrowd)
+      ? round4(curCrowd - prevCrowd)
+      : null;
+  const symbolCrowdingChange =
+    Number.isFinite(Number(prevO.crowdingDiagnostics?.symbolCrowdingScore)) &&
+    Number.isFinite(Number(curO.crowdingDiagnostics?.symbolCrowdingScore))
+      ? round4(
+          Number(curO.crowdingDiagnostics.symbolCrowdingScore) -
+            Number(prevO.crowdingDiagnostics.symbolCrowdingScore)
+        )
+      : null;
+  const strategyCrowdingChange =
+    Number.isFinite(Number(prevO.crowdingDiagnostics?.strategyCrowdingScore)) &&
+    Number.isFinite(Number(curO.crowdingDiagnostics?.strategyCrowdingScore))
+      ? round4(
+          Number(curO.crowdingDiagnostics.strategyCrowdingScore) -
+            Number(prevO.crowdingDiagnostics.strategyCrowdingScore)
+        )
+      : null;
+  const falseDivPrev = Number(prevO.crowdingDiagnostics?.falseDiversificationScore);
+  const falseDivCur = Number(curO.crowdingDiagnostics?.falseDiversificationScore);
+  const falseDiversificationChange =
+    Number.isFinite(falseDivPrev) && Number.isFinite(falseDivCur)
+      ? round4(falseDivCur - falseDivPrev)
+      : null;
+
+  let overlapMatrixInstability = null;
+  const prevPairs = prevO.matrices?.pairwiseTop || [];
+  const curPairs = curO.matrices?.pairwiseTop || [];
+  if (prevPairs.length && curPairs.length) {
+    const mapP = new Map(prevPairs.map((p) => [`${p.pairKeyA}||${p.pairKeyB}`, p.overlapScore]));
+    let deltaSum = 0;
+    let n = 0;
+    for (const p of curPairs.slice(0, 20)) {
+      const k = `${p.pairKeyA}||${p.pairKeyB}`;
+      if (mapP.has(k)) {
+        deltaSum += Math.abs(p.overlapScore - mapP.get(k));
+        n++;
+      }
+    }
+    overlapMatrixInstability = n > 0 ? round4(deltaSum / n) : null;
+  }
+
+  const overlapStabilityFlags = [];
+  if (crowdingScoreChange != null && crowdingScoreChange > 0.12) {
+    overlapStabilityFlags.push('crowding_jump');
+  }
+  if (falseDiversificationChange != null && falseDiversificationChange > 0.1) {
+    overlapStabilityFlags.push('false_diversification_increase');
+  }
+  if (overlapMatrixInstability != null && overlapMatrixInstability > 0.18) {
+    overlapStabilityFlags.push('overlap_instability_high');
+  }
+  if (
+    prevO.overlapDiagnostics?.duplicateExpressionCount != null &&
+    curO.overlapDiagnostics?.duplicateExpressionCount != null
+  ) {
+    const d =
+      curO.overlapDiagnostics.duplicateExpressionCount -
+      prevO.overlapDiagnostics.duplicateExpressionCount;
+    if (d >= 2) overlapStabilityFlags.push('duplicate_edge_cluster_shift');
+  }
+
+  for (const f of overlapStabilityFlags) {
+    if (!instabilityFlags.includes(f)) instabilityFlags.push(f);
+  }
+
+  if (overlapStabilityFlags.length && overallStabilityScore != null) {
+    overallStabilityScore = Math.round(
+      clamp(overallStabilityScore - overlapStabilityFlags.length * 6, 0, 100)
+    );
+  }
+
   return {
     policyStabilityVersion: POLICY_STABILITY_VERSION,
     generatedAt,
@@ -310,6 +398,16 @@ function buildPolicyStabilityDiagnostics(
       recommendedActionChanged,
       policyHealthScoreChange,
       instabilityFlags,
+    },
+    overlap: {
+      crowdingScoreChange,
+      symbolCrowdingChange,
+      strategyCrowdingChange,
+      falseDiversificationChange,
+      topCrowdedClusterChanges: [],
+      overlapMatrixInstability,
+      crowdedEntityFlipCount: null,
+      overlapStabilityFlags,
     },
     summary: {
       policyStabilityScore,

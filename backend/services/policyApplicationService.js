@@ -586,6 +586,8 @@ async function getPolicyOverview() {
     degradationFlags: state.degradationFlags || [],
     policyHealthScore: state.policyHealthScore ?? null,
     diagnostics: state.diagnostics || {},
+    correlationOverlapSummary: state.correlationOverlapSummary || null,
+    correlationOverlapWarnings: state.correlationOverlapWarnings || [],
   };
 }
 
@@ -622,15 +624,51 @@ async function runPolicyCycle(options = {}) {
     previousAllocationPlan = {};
   }
 
+  let previousOverlapState = {};
+  try {
+    previousOverlapState = await require('./correlationOverlapService').loadLatestCorrelationOverlapState();
+  } catch (e) {
+    previousOverlapState = {};
+  }
+
   const base = await buildPolicyState(options);
   const meta = wrapPolicyMetadata(previousPolicyState, base);
   let enriched = { ...base, ...meta };
+
+  let overlapState = {};
+  try {
+    const cos = require('./correlationOverlapService');
+    overlapState = await cos.runCorrelationOverlapCycle({
+      policyState: enriched,
+      allocationPlan: previousAllocationPlan,
+    });
+  } catch (e) {
+    console.warn(`[policy] overlap cycle: ${e.message}`);
+  }
+  if (overlapState && overlapState.generatedAt) {
+    console.log('[closed-trade→overlap] snapshot updated (in policy cycle)');
+  }
+
+  try {
+    const cos = require('./correlationOverlapService');
+    const adj = cos.applyPolicyCrowdingPenalties(enriched, overlapState);
+    enriched = {
+      ...enriched,
+      entities: adj.entities,
+      globalPolicy: { ...enriched.globalPolicy, ...adj.globalPolicyCrowding },
+      correlationOverlapSummary: overlapState.summary || null,
+      correlationOverlapWarnings: overlapState.warnings || [],
+    };
+  } catch (e) {
+    console.warn(`[policy] crowding penalties: ${e.message}`);
+  }
 
   let newAllocationPlan = {};
   try {
     const cap = require('./capitalAllocationService');
     newAllocationPlan = await cap.buildCapitalAllocationPlan({
       policyState: enriched,
+      correlationOverlapState: overlapState,
       skipAllocationPersistence: true,
       ...options,
     });
@@ -648,7 +686,9 @@ async function runPolicyCycle(options = {}) {
       enriched,
       previousPolicyState,
       newAllocationPlan,
-      previousAllocationPlan
+      previousAllocationPlan,
+      previousOverlapState,
+      overlapState
     );
     enriched.policyStabilityScore = diag.summary?.overallStabilityScore ?? null;
     enriched.stabilityFlags = diag.summary?.instabilityFlags || [];
