@@ -4,6 +4,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const liveExecutionGate = require('./liveExecutionGate');
 const paperTradingService = require('./paperTradingService');
+const capitalSafetyService = require('./capitalSafetyService');
+const securityAuditService = require('./securityAuditService');
 const policyApplicationService = require('./policyApplicationService');
 const capitalAllocationService = require('./capitalAllocationService');
 const correlationOverlapService = require('./correlationOverlapService');
@@ -485,14 +487,47 @@ async function submitAutonomousPaperOrder(orderIntent, deps = {}) {
   const mode = String(gate.getTradingMode ? gate.getTradingMode() : 'paper').toLowerCase();
   if (mode !== 'paper') {
     console.warn(`[autonomous] BLOCKED non-paper trading mode=${mode} (autonomous is paper-only)`);
+    securityAuditService.appendAuditSync({
+      eventType: 'autonomous_execution_blocked',
+      severity: 'critical',
+      actorType: 'system',
+      outcome: 'blocked',
+      reason: 'non_paper_mode',
+      symbol: orderIntent?.symbol,
+      metadata: { mode },
+    });
     return { ok: false, reason: 'autonomous_engine_paper_only', paperOnlyEnforced: PAPER_ONLY_ENFORCED };
   }
+
+  const cap = await capitalSafetyService.evaluateCapitalSafety({
+    source: 'autonomous',
+    orderIntent,
+    env: deps.env || process.env,
+  });
+  if (!cap.allowed) {
+    securityAuditService.appendAuditSync({
+      eventType: 'autonomous_execution_blocked',
+      severity: 'high',
+      actorType: 'system',
+      outcome: 'blocked',
+      reason: cap.blockingReason,
+      symbol: orderIntent?.symbol,
+      metadata: { code: cap.code, metrics: cap.metrics },
+    });
+    return { ok: false, reason: cap.blockingReason || 'capital_safety_block', code: cap.code };
+  }
+
   const accountBalance =
     deps.accountBalance ||
     Number(paperTradingService.getAccountSummary()?.equity) ||
     Number(process.env.ACCOUNT_BALANCE || '500');
   const result = await gate.executeOrder(orderIntent, { accountBalance });
   if (!result.success) return { ok: false, reason: result.reason || 'execution_rejected', result };
+  try {
+    await capitalSafetyService.recordAutonomousEntryAttempt();
+  } catch (e) {
+    void e;
+  }
   return { ok: true, result };
 }
 

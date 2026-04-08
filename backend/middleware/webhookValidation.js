@@ -120,6 +120,19 @@ async function webhookValidation(req, res, next) {
       });
     }
 
+    if (process.env.ENABLE_STRICT_WEBHOOK_SCHEMA === 'true') {
+      const requestValidationService = require('../services/requestValidationService');
+      const strict = requestValidationService.validateWebhookStrict(req.body);
+      if (!strict.ok) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          reason: strict.reason,
+          errors: strict.errors,
+          code: 'invalid_payload_schema',
+        });
+      }
+    }
+
     // Validation passed
     next();
   } catch (error) {

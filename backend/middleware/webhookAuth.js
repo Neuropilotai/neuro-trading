@@ -61,6 +61,10 @@ function verifySignature(payload, signature, secret) {
  * 2. HMAC header X-TradingView-Signature (raw body)
  */
 async function webhookAuth(req, res, next) {
+  if (req.authModeUsed === 'np_hmac') {
+    return next();
+  }
+
   // Check if auth is enabled (default: true)
   const authEnabled = process.env.ENABLE_WEBHOOK_AUTH !== 'false';
 

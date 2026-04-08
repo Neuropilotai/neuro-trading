@@ -119,6 +119,30 @@ async function executeOrderCore(orderIntent, options = {}) {
   }
 
   const tm = readTradingMode(env);
+  if (tm === 'live') {
+    const executionModeGuard = require('./executionModeGuard');
+    const liveCheck = executionModeGuard.evaluateLiveExecutionAllowed(orderIntent, { env });
+    if (!liveCheck.allowed) {
+      const securityAuditService = require('./securityAuditService');
+      securityAuditService.appendAuditSync({
+        eventType: 'blocked_live_attempt',
+        severity: 'critical',
+        actorType: 'system',
+        outcome: 'blocked',
+        reason: liveCheck.reason,
+        symbol: orderIntent.symbol,
+        executionMode: executionModeGuard.readExecutionMode(env),
+        metadata: { source: 'liveExecutionGate', code: liveCheck.code },
+      });
+      return {
+        success: false,
+        reason: liveCheck.reason || 'live_execution_blocked',
+        tradeId: null,
+        executionResult: null,
+      };
+    }
+  }
+
   if (tm === 'dry_run') {
     console.log(
       `[liveExecutionGate] DRY_RUN: ${orderIntent.action} ${orderIntent.symbol} qty=${orderIntent.quantity} @ ${orderIntent.price}`

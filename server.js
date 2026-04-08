@@ -26,7 +26,11 @@ const rateLimit = require('express-rate-limit');
 
 // Import middleware and services
 const { webhookAuth } = require('./backend/middleware/webhookAuth');
+const { webhookHmacAuth } = require('./backend/middleware/webhookHmacAuth');
+const { requireApiRole, allowDevOrSecuredRole } = require('./backend/middleware/adminAuth');
 const { webhookValidation } = require('./backend/middleware/webhookValidation');
+const securityAuditService = require('./backend/services/securityAuditService');
+const securityStatusService = require('./backend/services/securityStatusService');
 const { riskCheck } = require('./backend/middleware/riskCheck');
 const deduplicationService = require('./backend/services/deduplicationService');
 const riskEngine = require('./backend/services/riskEngine');
@@ -82,7 +86,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-TradingView-Signature');
+    res.header(
+        'Access-Control-Allow-Headers',
+        'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-TradingView-Signature, x-np-signature, x-np-timestamp, x-np-key-id, X-NP-Signature, X-NP-Timestamp, X-NP-Key-Id'
+    );
     if (req.method === 'OPTIONS') {
         res.sendStatus(200);
     } else {
@@ -108,7 +115,8 @@ const limiter = rateLimit({
 // Main webhook endpoint for TradingView
 app.post('/webhook/tradingview',
   limiter,                    // Rate limiting
-  webhookAuth,                // HMAC signature verification
+  webhookHmacAuth,            // Optional x-np-signature + timestamp + replay (ENABLE_WEBHOOK_HMAC_AUTH)
+  webhookAuth,                // Body secret / X-TradingView-Signature
   webhookValidation,          // Payload validation
   async (req, res, next) => { // Deduplication check
     try {
@@ -708,10 +716,7 @@ app.get('/api/learning/decisions', async (req, res) => {
     }
 });
 
-app.post('/api/learning/run', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/learning/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
         const state = await reinforcementLearningService.runLearningCycle({
             from: req.query.from || req.body?.from,
@@ -918,10 +923,7 @@ app.get('/api/policy/entity', async (req, res) => {
     }
 });
 
-app.post('/api/policy/run', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/policy/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
         const state = await policyApplicationService.runPolicyCycle({
             from: req.query.from || req.body?.from,
@@ -1021,10 +1023,7 @@ app.get('/api/allocation/history', async (req, res) => {
     }
 });
 
-app.post('/api/allocation/run', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/allocation/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
         const plan = await capitalAllocationService.getCapitalAllocationPlan({
             from: req.query.from || req.body?.from,
@@ -1151,10 +1150,7 @@ app.get('/api/overlap/warnings', async (req, res) => {
     }
 });
 
-app.post('/api/overlap/run', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/overlap/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
         const policyState = await policyApplicationService.loadPolicyState();
         let allocationPlan = {};
@@ -1225,11 +1221,35 @@ app.get('/api/autonomous/open-positions', async (req, res) => {
     }
 });
 
-app.post('/api/autonomous/run-scan', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.get('/api/security/status', requireApiRole('readonly'), async (req, res) => {
     try {
+        res.json({ ok: true, status: securityStatusService.buildSecurityStatus() });
+    } catch (error) {
+        console.error('❌ /api/security/status:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/security/audit', requireApiRole('operator'), async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '100', 10);
+        const entries = await securityAuditService.readRecentAudit(limit);
+        res.json({ ok: true, count: entries.length, entries });
+    } catch (error) {
+        console.error('❌ /api/security/audit:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/autonomous/run-scan', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
+    try {
+        await securityAuditService.appendAudit({
+            eventType: 'autonomous_scan_invoked',
+            severity: 'info',
+            route: '/api/autonomous/run-scan',
+            ip: req.ip,
+            outcome: 'ok',
+        });
         const cycle = await autonomousEntryEngine.runScanCycle();
         res.json({ ok: true, cycle });
     } catch (error) {
@@ -1238,11 +1258,15 @@ app.post('/api/autonomous/run-scan', async (req, res) => {
     }
 });
 
-app.post('/api/autonomous/run-exits', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/autonomous/run-exits', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
+        await securityAuditService.appendAudit({
+            eventType: 'autonomous_exit_run_invoked',
+            severity: 'info',
+            route: '/api/autonomous/run-exits',
+            ip: req.ip,
+            outcome: 'ok',
+        });
         const cycle = await autonomousEntryEngine.runExitCycle();
         res.json({ ok: true, cycle });
     } catch (error) {
@@ -1251,11 +1275,15 @@ app.post('/api/autonomous/run-exits', async (req, res) => {
     }
 });
 
-app.post('/api/autonomous/start', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/autonomous/start', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
+        await securityAuditService.appendAudit({
+            eventType: 'autonomous_engine_start_request',
+            severity: 'info',
+            route: '/api/autonomous/start',
+            ip: req.ip,
+            outcome: 'ok',
+        });
         const status = await autonomousEntryEngine.start();
         res.json({ ok: true, status });
     } catch (error) {
@@ -1264,11 +1292,15 @@ app.post('/api/autonomous/start', async (req, res) => {
     }
 });
 
-app.post('/api/autonomous/stop', async (req, res) => {
-    if (!isDevEndpointsEnabled()) {
-        return res.status(404).json({ ok: false, error: 'Not found' });
-    }
+app.post('/api/autonomous/stop', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
     try {
+        await securityAuditService.appendAudit({
+            eventType: 'autonomous_engine_stop_request',
+            severity: 'info',
+            route: '/api/autonomous/stop',
+            ip: req.ip,
+            outcome: 'ok',
+        });
         const status = await autonomousEntryEngine.stop();
         res.json({ ok: true, status });
     } catch (error) {

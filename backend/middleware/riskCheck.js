@@ -283,6 +283,30 @@ async function riskCheck(req, res, next) {
     return next();
   }
 
+  const executionModeGuard = require('../services/executionModeGuard');
+  const webEv = executionModeGuard.evaluateWebhookExecutionAllowed(orderIntent, process.env);
+  if (!webEv.allowed) {
+    await executionModeGuard.auditBlockedLiveAttempt(webEv.reason, {
+      source: 'webhook',
+      symbol: orderIntent.symbol,
+    });
+    return res.status(403).json({
+      status: 'error',
+      error: webEv.reason,
+      code: webEv.code || 'symbol_not_allowed',
+    });
+  }
+
+  const capitalSafetyService = require('../services/capitalSafetyService');
+  const cap = await capitalSafetyService.evaluateCapitalSafety({ source: 'webhook', orderIntent });
+  if (!cap.allowed) {
+    return res.status(403).json({
+      status: 'error',
+      error: cap.blockingReason,
+      code: cap.code || 'capital_safety_block',
+    });
+  }
+
   try {
     validateExposureLimits(orderIntent);
   } catch (error) {

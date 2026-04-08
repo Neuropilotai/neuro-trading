@@ -7,6 +7,7 @@ const autonomousSetupEngine = require('./autonomousSetupEngine');
 const autonomousScoring = require('./autonomousCandidateScoringService');
 const autonomousCoordinator = require('./autonomousExecutionCoordinator');
 const autonomousExitManager = require('./autonomousExitManager');
+const securityAuditService = require('./securityAuditService');
 
 const AUTONOMOUS_ENTRY_ENGINE_VERSION = 2;
 
@@ -465,6 +466,15 @@ class AutonomousEntryEngine {
     }
 
     await this.saveStatus();
+    securityAuditService
+      .appendAudit({
+        eventType: 'autonomous_engine_started',
+        severity: 'info',
+        actorType: 'system',
+        outcome: 'ok',
+        metadata: { symbols: this.symbols },
+      })
+      .catch(() => {});
     return this.getStatus();
   }
 
@@ -477,6 +487,14 @@ class AutonomousEntryEngine {
     this.running = false;
     this.status.running = false;
     await this.saveStatus();
+    securityAuditService
+      .appendAudit({
+        eventType: 'autonomous_engine_stopped',
+        severity: 'info',
+        actorType: 'system',
+        outcome: 'ok',
+      })
+      .catch(() => {});
     return this.getStatus();
   }
 }
