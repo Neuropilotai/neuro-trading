@@ -249,6 +249,21 @@ async function run() {
     assert.strictEqual(eng.timers.exit, null);
   });
 
+  const autoEst = coordinator.estimateAutonomousExecutionCosts(
+    {
+      symbol: 'XAUUSD',
+      entryReferencePrice: 2000,
+      setupType: 'breakout_continuation',
+      features: { sessionTag: 'london' },
+    },
+    { quantity: 0.02, notional: 40 },
+    { score: 0.6 }
+  );
+  assert.ok(autoEst.expectedExecutionCostBps != null);
+  assert.ok(autoEst.expectedExecutionCostDollars != null);
+  assert.ok(autoEst.expectedNetEdgeScore != null);
+  assert.ok(Array.isArray(autoEst.executionRealismReasons));
+
   console.log('✅ autonomousEntryEngine tests passed');
   process.exit(0);
 }

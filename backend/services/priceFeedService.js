@@ -140,7 +140,8 @@ class PriceFeedService {
   getAccountPricingMeta(positionSymbols = []) {
     if (!this.isLiveEnabled()) {
       return {
-        pricingMode: 'degraded',
+        /** Mark-to-market quote path — not TRADING_MODE / not broker live execution */
+        pricingMode: 'mark_feed_off',
         priceLatency: this.lastGlobalLatencyMs,
       };
     }
@@ -150,7 +151,8 @@ class PriceFeedService {
         : [...this.lastSeenBySymbol.keys()];
     const fresh = list.some((s) => this._isLiveFresh(s));
     return {
-      pricingMode: fresh ? 'live' : 'degraded',
+      /** Fresh external quote within TTL — avoid calling this "live" (confuses with live trading) */
+      pricingMode: fresh ? 'mark_quote_fresh' : 'mark_quote_stale',
       priceLatency: this.lastGlobalLatencyMs,
     };
   }

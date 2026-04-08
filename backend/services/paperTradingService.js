@@ -671,14 +671,50 @@ class PaperTradingService extends EventEmitter {
       const marketValue = quantity * effectiveLastPrice;
       const unrealizedPnL = marketValue - bookValue;
 
+      const refPx =
+        pos.referenceAvgPrice != null && Number.isFinite(Number(pos.referenceAvgPrice))
+          ? Number(pos.referenceAvgPrice)
+          : avgPrice;
+      const notionRef = refPx > 0 && quantity > 0 ? refPx * quantity : 0;
+      const fr = pos.entryFriction || { spread: 0, slippage: 0, fee: 0, impact: 0 };
+      let executionFrictionAtEntry = null;
+      if (notionRef > 0) {
+        const hasFr =
+          (Number(fr.spread) || 0) +
+            (Number(fr.slippage) || 0) +
+            (Number(fr.fee) || 0) +
+            (Number(fr.impact) || 0) >
+          1e-12;
+        if (hasFr) {
+          const sp = ((Number(fr.spread) || 0) / notionRef) * 10000;
+          const sl = ((Number(fr.slippage) || 0) / notionRef) * 10000;
+          const im = ((Number(fr.impact) || 0) / notionRef) * 10000;
+          const fe = ((Number(fr.fee) || 0) / notionRef) * 10000;
+          executionFrictionAtEntry = {
+            spreadBps: Math.round(sp * 1e4) / 1e4,
+            slippageBps: Math.round(sl * 1e4) / 1e4,
+            impactBps: Math.round(im * 1e4) / 1e4,
+            feeBps: Math.round(fe * 1e4) / 1e4,
+            totalBps: Math.round((sp + sl + im + fe) * 1e4) / 1e4,
+          };
+        } else if (Number.isFinite(avgPrice) && Math.abs(avgPrice - refPx) > 1e-12) {
+          const totalBps = ((avgPrice - refPx) / refPx) * 10000;
+          executionFrictionAtEntry = {
+            spreadBps: null,
+            slippageBps: null,
+            impactBps: null,
+            feeBps: null,
+            totalBps: Math.round(totalBps * 1e4) / 1e4,
+            impliedFromRefVsAvgOnly: true,
+          };
+        }
+      }
+
       return {
         symbol: normalizedSymbol,
         quantity,
         avgPrice,
-        referenceAvgPrice:
-          pos.referenceAvgPrice != null && Number.isFinite(Number(pos.referenceAvgPrice))
-            ? Number(pos.referenceAvgPrice)
-            : avgPrice,
+        referenceAvgPrice: refPx,
         lastPrice: effectiveLastPrice,
         priceSource,
         markTimestamp,
@@ -699,6 +735,11 @@ class PaperTradingService extends EventEmitter {
             ? pos.autonomousMetadata
             : null,
         maxHoldingMinutes: pos.maxHoldingMinutes != null ? Number(pos.maxHoldingMinutes) : null,
+        executionFrictionAtEntry,
+        accumulatedEntryExecutionCost:
+          pos.accumulatedEntryExecutionCost != null && Number.isFinite(Number(pos.accumulatedEntryExecutionCost))
+            ? Number(pos.accumulatedEntryExecutionCost)
+            : null,
       };
     });
 
@@ -715,7 +756,7 @@ class PaperTradingService extends EventEmitter {
 
     if (String(process.env.PRICE_MTM_LOG || '').trim().toLowerCase() === 'true') {
       console.log(
-        `[MTM] equity=${equity.toFixed(4)} unrealizedPnL=${totalUnrealizedPnL.toFixed(4)} mode=${pricingMode}`
+        `[MTM] equity=${equity.toFixed(4)} unrealizedPnL=${totalUnrealizedPnL.toFixed(4)} pricingMark=${pricingMode}`
       );
     }
 

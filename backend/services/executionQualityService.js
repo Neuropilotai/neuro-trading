@@ -27,6 +27,58 @@ function _mean(arr) {
   return a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
 }
 
+/** Notional for bps: prefer reference exit * qty, else exit avg * qty, else |marketValueAtExit|. */
+function notionalForBps(t) {
+  const qty = Number(t.closedQuantity);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  const refEx = Number(t.referenceExitPrice);
+  const ex = Number(t.exitPriceAvg);
+  const px = Number.isFinite(refEx) && refEx > 0 ? refEx : Number.isFinite(ex) && ex > 0 ? ex : null;
+  if (px != null) return px * qty;
+  const mv = Number(t.marketValueAtExit);
+  if (Number.isFinite(mv) && Math.abs(mv) > 0) return Math.abs(mv);
+  return null;
+}
+
+/**
+ * Resolve bps from stored fields or dollar cost breakdown (backward compatible with pre-realism rows).
+ * @returns {{ te: number|null, sp: number|null, sl: number|null, fe: number|null }}
+ */
+function bpsComponentsForRow(t) {
+  const N = notionalForBps(t);
+  let te = Number(t.executionCostBps != null ? t.executionCostBps : t.totalExecutionCostBps);
+  let sp = Number(t.spreadCostBps);
+  let sl = Number(t.slippageCostBps);
+  let fe = Number(t.feeCostBps);
+
+  if (!Number.isFinite(te) && N != null && N > 0) {
+    const tc = Number(t.totalExecutionCost);
+    if (Number.isFinite(tc)) te = (Math.abs(tc) / N) * 10000;
+  }
+
+  const spread$ =
+    (Number(t.entrySpreadCost) || 0) + (Number(t.exitSpreadCost) || 0);
+  const slip$ =
+    (Number(t.entrySlippageCost) || 0) +
+    (Number(t.exitSlippageCost) || 0) +
+    (Number(t.entryImpactCost) || 0) +
+    (Number(t.exitImpactCost) || 0);
+  const fee$ = (Number(t.entryFeeCost) || 0) + (Number(t.exitFeeCost) || 0);
+
+  if (N != null && N > 0) {
+    if (!Number.isFinite(sp) && spread$ > 0) sp = (spread$ / N) * 10000;
+    if (!Number.isFinite(sl) && slip$ > 0) sl = (slip$ / N) * 10000;
+    if (!Number.isFinite(fe) && fee$ > 0) fe = (fee$ / N) * 10000;
+  }
+
+  return {
+    te: Number.isFinite(te) ? te : null,
+    sp: Number.isFinite(sp) && sp >= 0 ? sp : null,
+    sl: Number.isFinite(sl) && sl >= 0 ? sl : null,
+    fe: Number.isFinite(fe) && fe >= 0 ? fe : null,
+  };
+}
+
 /**
  * @param {object[]} trades - closed trade rows
  */
@@ -69,15 +121,16 @@ function summarizeExecutionQuality(trades) {
   const bySess = new Map();
 
   for (const t of rows) {
-    const te = Number(t.executionCostBps != null ? t.executionCostBps : t.totalExecutionCostBps);
-    const sp = Number(t.spreadCostBps);
-    const sl = Number(t.slippageCostBps);
-    const fe = Number(t.feeCostBps);
+    const bps = bpsComponentsForRow(t);
+    const te = bps.te;
+    const sp = bps.sp;
+    const sl = bps.sl;
+    const fe = bps.fe;
 
     if (Number.isFinite(te)) totalBps.push(te);
-    if (Number.isFinite(sp) && sp >= 0) spreadBps.push(sp);
-    if (Number.isFinite(sl) && sl >= 0) slipBps.push(sl);
-    if (Number.isFinite(fe) && fe >= 0) feeBps.push(fe);
+    if (sp != null) spreadBps.push(sp);
+    if (sl != null) slipBps.push(sl);
+    if (fe != null) feeBps.push(fe);
 
     const g = Number(t.grossRealizedPnL);
     const net = Number(t.netRealizedPnL != null ? t.netRealizedPnL : t.realizedPnL);
@@ -105,7 +158,7 @@ function summarizeExecutionQuality(trades) {
       o.costBps += delta;
       o.n++;
     };
-    if (Number.isFinite(te)) {
+    if (te != null && Number.isFinite(te)) {
       push(bySym, sym, te);
       push(byStrat, st, te);
       push(bySess, sess, te);
@@ -126,6 +179,7 @@ function summarizeExecutionQuality(trades) {
 
   return {
     tradeCount: n,
+    /** Closed-trade journal only; may be null when no rows or legacy rows without bps */
     avgSpreadCostBps: spreadBps.length ? round4(_mean(spreadBps)) : null,
     avgSlippageCostBps: slipBps.length ? round4(_mean(slipBps)) : null,
     avgFeeCostBps: feeBps.length ? round4(_mean(feeBps)) : null,
@@ -154,12 +208,99 @@ async function loadRecentTrades(limit = 200) {
 }
 
 /**
+ * Aggregate entry-leg execution bps from open paper positions (reference vs avg + optional friction split).
+ */
+function summarizeOpenBookPositions(positions) {
+  const rows = Array.isArray(positions) ? positions : [];
+  const spread = [];
+  const slipImpact = [];
+  const fee = [];
+  const total = [];
+  let n = 0;
+  for (const p of rows) {
+    const q = Number(p.quantity);
+    if (!Number.isFinite(q) || q <= 0) continue;
+    const x = p.executionFrictionAtEntry;
+    if (!x || !Number.isFinite(Number(x.totalBps))) continue;
+    n++;
+    if (Number.isFinite(x.spreadBps)) spread.push(Number(x.spreadBps));
+    const sim = (Number(x.slippageBps) || 0) + (Number(x.impactBps) || 0);
+    if (sim > 0) slipImpact.push(sim);
+    if (Number.isFinite(x.feeBps)) fee.push(Number(x.feeBps));
+    total.push(Number(x.totalBps));
+  }
+  const openPositionCount = rows.filter((p) => Number(p.quantity) > 0).length;
+  if (n === 0) {
+    return {
+      openPositionCount,
+      positionsWithFriction: 0,
+      avgSpreadCostBps: null,
+      avgSlippageCostBps: null,
+      avgFeeCostBps: null,
+      avgTotalExecutionCostBps: null,
+      source: null,
+    };
+  }
+  return {
+    openPositionCount,
+    positionsWithFriction: n,
+    avgSpreadCostBps: spread.length ? round4(_mean(spread)) : null,
+    avgSlippageCostBps: slipImpact.length ? round4(_mean(slipImpact)) : null,
+    avgFeeCostBps: fee.length ? round4(_mean(fee)) : null,
+    avgTotalExecutionCostBps: total.length ? round4(_mean(total)) : null,
+    source: 'open_book_entry_leg',
+  };
+}
+
+/**
+ * Merge closed-trade averages with open-book entry proxies when closed metrics are empty.
+ */
+function mergeClosedAndOpenExecutionSummary(closedSummary, openBook) {
+  const usedOpen = {
+    spread: closedSummary.avgSpreadCostBps == null && openBook.avgSpreadCostBps != null,
+    slip: closedSummary.avgSlippageCostBps == null && openBook.avgSlippageCostBps != null,
+    fee: closedSummary.avgFeeCostBps == null && openBook.avgFeeCostBps != null,
+    total: closedSummary.avgTotalExecutionCostBps == null && openBook.avgTotalExecutionCostBps != null,
+  };
+  const any = usedOpen.spread || usedOpen.slip || usedOpen.fee || usedOpen.total;
+  return {
+    ...closedSummary,
+    openBookExecution: openBook,
+    avgSpreadCostBps: closedSummary.avgSpreadCostBps ?? openBook.avgSpreadCostBps ?? null,
+    avgSlippageCostBps: closedSummary.avgSlippageCostBps ?? openBook.avgSlippageCostBps ?? null,
+    avgFeeCostBps: closedSummary.avgFeeCostBps ?? openBook.avgFeeCostBps ?? null,
+    avgTotalExecutionCostBps: closedSummary.avgTotalExecutionCostBps ?? openBook.avgTotalExecutionCostBps ?? null,
+    openBookFillsSummaryGaps: any === true,
+    openBookFieldsUsed: any ? usedOpen : null,
+  };
+}
+
+/**
  * Stable summary for APIs / policy / dashboards.
  */
 async function getExecutionQualitySummary(options = {}) {
   const limit = parseInt(options.limit, 10) || 200;
   const trades = await loadRecentTrades(limit);
-  const summary = summarizeExecutionQuality(trades);
+  const closedSummary = summarizeExecutionQuality(trades);
+
+  let openBook = {
+    openPositionCount: 0,
+    positionsWithFriction: 0,
+    avgSpreadCostBps: null,
+    avgSlippageCostBps: null,
+    avgFeeCostBps: null,
+    avgTotalExecutionCostBps: null,
+    source: null,
+  };
+  try {
+    const paperTradingService = require('./paperTradingService');
+    const acc = paperTradingService.getAccountSummary();
+    openBook = summarizeOpenBookPositions(acc.positions || []);
+  } catch (e) {
+    void e;
+  }
+
+  const summary = mergeClosedAndOpenExecutionSummary(closedSummary, openBook);
   return {
     generatedAt: new Date().toISOString(),
     tradesUsed: trades.length,
@@ -179,6 +320,8 @@ async function persistLatest(summary) {
 
 module.exports = {
   summarizeExecutionQuality,
+  summarizeOpenBookPositions,
+  mergeClosedAndOpenExecutionSummary,
   getExecutionQualitySummary,
   buildExecutionOverview: getExecutionQualitySummary,
   persistLatest,

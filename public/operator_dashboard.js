@@ -173,7 +173,7 @@
         </div>
         <div class="card">
           <h3>Pricing</h3>
-          <div class="metric"><span class="k">Mode</span><span class="v">${escapeHtml(String((h && h.pricing && h.pricing.pricingMode) || '—'))}</span></div>
+          <div class="metric"><span class="k">MTM quote path</span><span class="v">${escapeHtml(String((h && h.pricing && h.pricing.pricingMode) || '—'))}</span></div>
           <div class="metric"><span class="k">Latency (ms)</span><span class="v">${fmtNum(h && h.pricing && h.pricing.priceLatency)}</span></div>
         </div>
         <div class="card">
@@ -353,6 +353,8 @@
           <div class="metric"><span class="k">Gross win % / net win %</span><span class="v">${fmtNum(ex.grossWinRate)} / ${fmtNum(ex.costAdjustedWinRate)}</span></div>
           <div class="metric"><span class="k">Cost flips win→loss %</span><span class="v">${fmtNum(ex.percentTradesWhereCostsFlippedGrossWinToNetLoss)}</span></div>
           <div class="metric"><span class="k">Poor fill %</span><span class="v">${fmtNum(ex.percentTradesWithPoorFillQuality)}</span></div>
+          <div class="metric"><span class="k">Open book (entry leg)</span><span class="v">${ex.openBookExecution && ex.openBookExecution.openPositionCount ? fmtNum(ex.openBookExecution.openPositionCount) + ' pos, ' + fmtNum(ex.openBookExecution.positionsWithFriction) + ' w/ friction' : '—'}</span></div>
+          <div class="metric"><span class="k">Gap fill from open book</span><span class="v">${ex.openBookFillsSummaryGaps ? pill('yes', 'warn') : pill('no', 'ok')}</span></div>
         </div>
         <div class="card">
           <h3>Warnings &amp; worst actors</h3>

@@ -28,7 +28,7 @@ async function run() {
     quantity: 1,
     notional: 2000,
     quote: { latencyMs: 40, source: 'live' },
-    pricingMode: 'live',
+    pricingMode: 'mark_quote_fresh',
   });
   assert.ok(buyFill.effectiveFillPrice >= buyFill.referencePrice);
   assert.ok(buyFill.effectiveFillPrice > buyFill.referencePrice);
@@ -141,6 +141,62 @@ async function run() {
   ]);
   assert.ok(q.tradeCount === 2);
   assert.ok(q.avgTotalExecutionCostBps != null);
+
+  // 7b) Derive execution bps from dollars when bps columns missing (legacy rows)
+  const derived = executionQualityService.summarizeExecutionQuality([
+    {
+      symbol: 'XAUUSD',
+      strategy: 'legacy',
+      closedQuantity: 1,
+      exitPriceAvg: 100,
+      totalExecutionCost: 0.5,
+      grossRealizedPnL: 1,
+      netRealizedPnL: 0.5,
+      realizedPnL: 0.5,
+      entryTimestamp: '2026-01-01T00:00:00.000Z',
+      exitTimestamp: '2026-01-01T01:00:00.000Z',
+    },
+  ]);
+  assert.strictEqual(derived.avgTotalExecutionCostBps, 50);
+
+  const ob = executionQualityService.summarizeOpenBookPositions([
+    {
+      symbol: 'XAUUSD',
+      quantity: 0.01,
+      executionFrictionAtEntry: {
+        spreadBps: 2,
+        slippageBps: 1,
+        impactBps: 0.5,
+        feeBps: 1,
+        totalBps: 4.5,
+      },
+    },
+  ]);
+  assert.strictEqual(ob.positionsWithFriction, 1);
+  assert.strictEqual(ob.avgTotalExecutionCostBps, 4.5);
+
+  const merged = executionQualityService.mergeClosedAndOpenExecutionSummary(
+    {
+      tradeCount: 0,
+      avgSpreadCostBps: null,
+      avgSlippageCostBps: null,
+      avgFeeCostBps: null,
+      avgTotalExecutionCostBps: null,
+      avgCostToGrossRatio: null,
+      percentTradesWhereCostsFlippedGrossWinToNetLoss: 0,
+      percentTradesWithPoorFillQuality: 0,
+      costAdjustedWinRate: null,
+      grossWinRate: null,
+      grossVsNetPnLGap: null,
+      worstExecutionSymbols: [],
+      worstExecutionStrategies: [],
+      worstExecutionSessions: [],
+      executionRealismWarnings: [],
+    },
+    ob
+  );
+  assert.strictEqual(merged.avgTotalExecutionCostBps, 4.5);
+  assert.strictEqual(merged.openBookFillsSummaryGaps, true);
 
   // 8) Disabled realism: no drift
   process.env.EXEC_REALISM_ENABLED = 'false';
