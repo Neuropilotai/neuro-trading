@@ -47,6 +47,7 @@ const policyStabilityService = require('./backend/services/policyStabilityServic
 const shadowAllocationService = require('./backend/services/shadowAllocationService');
 const correlationOverlapService = require('./backend/services/correlationOverlapService');
 const autonomousEntryEngine = require('./backend/services/autonomousEntryEngine');
+const dynamicUniverseManager = require('./backend/services/dynamicUniverseManager');
 const autonomousExecutionCoordinator = require('./backend/services/autonomousExecutionCoordinator');
 const tradingLearningService = require('./backend/services/tradingLearningService');
 const patternRecognitionService = require('./backend/services/patternRecognitionService');
@@ -1115,6 +1116,67 @@ app.post('/api/allocation/run', allowDevOrSecuredRole('operator', isDevEndpoints
         res.json({ ok: true, ...plan });
     } catch (error) {
         console.error('❌ /api/allocation/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+// Dynamic symbol universe (advisory; rule-based selection for autonomous scanning — does not trade)
+app.get('/api/universe', async (req, res) => {
+    try {
+        const snap = dynamicUniverseManager.loadLatestDynamicUniverseSnapshot();
+        if (snap && snap.ok !== false) {
+            res.json({ fromSnapshot: true, ...snap });
+            return;
+        }
+        res.json({
+            ok: false,
+            error: 'no_snapshot',
+            message: 'No snapshot on disk yet. POST /api/universe/run to build (requires operator in production).',
+        });
+    } catch (error) {
+        console.error('❌ /api/universe:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/universe/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
+    try {
+        const ctx = req.body && typeof req.body === 'object' ? req.body.context || {} : {};
+        const result = dynamicUniverseManager.buildDynamicUniverse(ctx);
+        res.status(result.ok ? 200 : 400).json(result);
+    } catch (error) {
+        console.error('❌ /api/universe/run:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.get('/api/universe/macro', async (req, res) => {
+    try {
+        const snap = dynamicUniverseManager.loadLatestMacroUniverseSnapshot();
+        if (snap && snap.ok !== false) {
+            res.json({ fromSnapshot: true, ...snap });
+            return;
+        }
+        res.json({
+            ok: false,
+            error: 'no_macro_snapshot',
+            message: 'No macro universe snapshot yet. POST /api/universe/macro/run to build.',
+        });
+    } catch (error) {
+        console.error('❌ /api/universe/macro:', error.message);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post('/api/universe/macro/run', allowDevOrSecuredRole('operator', isDevEndpointsEnabled), async (req, res) => {
+    try {
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        const ctx = body.context || {};
+        const cfg = { ...dynamicUniverseManager.getDynamicUniverseConfig(), macroEnabled: true, ...(body.config || {}) };
+        const result = dynamicUniverseManager.buildDynamicUniverse({ ...ctx, config: cfg });
+        res.status(result.ok ? 200 : 400).json(result);
+    } catch (error) {
+        console.error('❌ /api/universe/macro/run:', error.message);
         res.status(500).json({ ok: false, error: error.message });
     }
 });
@@ -2650,7 +2712,7 @@ function startServer() {
     console.log(
         `   scan=${process.env.AUTO_ENTRY_SCAN_INTERVAL_SECONDS || '60'}s exit=${
             process.env.AUTO_EXIT_SCAN_INTERVAL_SECONDS || '30'
-        }s symbols=${process.env.AUTO_ENTRY_SYMBOLS || 'XAUUSD,EURUSD'}`
+        }s symbols=${autonomousEntryEngine.getStatus().symbols.join(',') || dynamicUniverseManager.DEFAULT_SYMBOL_CSV}`
     );
     console.log(`🎯 Indicator Generation: ${indicatorGenerator.enabled ? 'ENABLED' : 'DISABLED'} (${indicatorGenerator.tradingStyle})`);
     console.log(`🤖 Automated Trading: ${automatedScalpingTrader.enabled ? 'ENABLED' : 'DISABLED'}`);
