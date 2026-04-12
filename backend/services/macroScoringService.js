@@ -31,6 +31,8 @@ function getSymbolMacroSensitivityMap() {
     EURUSD: { usd: 0.95, rates: 0.75, inflation: 0.6, growth: 0.5, centralBank: 0.7 },
     USDJPY: { usd: 0.9, rates: 0.85, riskOff: 0.7, centralBank: 0.8, inflation: 0.5 },
     BTCUSD: { usd: 0.5, riskOn: 0.9, liquidity: 0.8, sentiment: 0.9, inflation: 0.3 },
+    LTCUSD: { usd: 0.45, riskOn: 0.85, liquidity: 0.75, sentiment: 0.85 },
+    SOLUSD: { usd: 0.45, riskOn: 0.88, liquidity: 0.78, sentiment: 0.88 },
     NAS100USD: { rates: 0.9, riskOn: 0.85, growth: 0.75, tech: 0.8, inflation: 0.45 },
     SPX500USD: { rates: 0.75, riskOn: 0.75, growth: 0.75, broadRisk: 0.8, inflation: 0.5 },
     ETHUSD: { usd: 0.45, riskOn: 0.85, liquidity: 0.75, sentiment: 0.85 },

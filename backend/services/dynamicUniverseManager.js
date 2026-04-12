@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const macroScoringService = require('./macroScoringService');
+const weekendUniversePolicy = require('./weekendUniversePolicy');
 
 const MODULE_VERSION = 1;
 const MODULE_VERSION_MACRO = 2;
@@ -23,19 +24,92 @@ const DEFAULT_BASE_SYMBOLS_CSV = 'XAUUSD,EURUSD,USDJPY,BTCUSD,NAS100USD,SPX500US
 /**
  * Extensible symbol metadata (liquidity, class). Unknown symbols are dropped or penalized.
  */
+/** tradingSchedule: 24x7 | weekdays | session_based (weekend policy uses 24x7) */
 const SYMBOL_METADATA = Object.freeze({
-  XAUUSD: { assetClass: 'metals', enabledByDefault: true, liquidityTier: 'high' },
-  EURUSD: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  GBPUSD: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  USDJPY: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  AUDUSD: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  USDCAD: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  NZDUSD: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'medium' },
-  USDCHF: { assetClass: 'fx', enabledByDefault: true, liquidityTier: 'high' },
-  BTCUSD: { assetClass: 'crypto', enabledByDefault: true, liquidityTier: 'medium' },
-  ETHUSD: { assetClass: 'crypto', enabledByDefault: true, liquidityTier: 'medium' },
-  NAS100USD: { assetClass: 'indices', enabledByDefault: true, liquidityTier: 'high' },
-  SPX500USD: { assetClass: 'indices', enabledByDefault: true, liquidityTier: 'high' },
+  XAUUSD: {
+    assetClass: 'metals',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  EURUSD: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  GBPUSD: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  USDJPY: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  AUDUSD: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  USDCAD: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  NZDUSD: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'medium',
+    tradingSchedule: 'weekdays',
+  },
+  USDCHF: {
+    assetClass: 'fx',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  BTCUSD: {
+    assetClass: 'crypto',
+    enabledByDefault: true,
+    liquidityTier: 'medium',
+    tradingSchedule: '24x7',
+  },
+  ETHUSD: {
+    assetClass: 'crypto',
+    enabledByDefault: true,
+    liquidityTier: 'medium',
+    tradingSchedule: '24x7',
+  },
+  LTCUSD: {
+    assetClass: 'crypto',
+    enabledByDefault: true,
+    liquidityTier: 'medium',
+    tradingSchedule: '24x7',
+  },
+  SOLUSD: {
+    assetClass: 'crypto',
+    enabledByDefault: true,
+    liquidityTier: 'medium',
+    tradingSchedule: '24x7',
+  },
+  NAS100USD: {
+    assetClass: 'indices',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
+  SPX500USD: {
+    assetClass: 'indices',
+    enabledByDefault: true,
+    liquidityTier: 'high',
+    tradingSchedule: 'weekdays',
+  },
 });
 
 function getDataDir() {
@@ -92,6 +166,14 @@ function getDynamicUniverseConfig(overrides = {}) {
     calendarEnabled: parseBool(e.DYNAMIC_UNIVERSE_CALENDAR_ENABLED, false),
     macroWriteSnapshot: parseBool(e.DYNAMIC_UNIVERSE_MACRO_WRITE_SNAPSHOT, true),
     macroSnapshotPath: e.DYNAMIC_UNIVERSE_MACRO_SNAPSHOT_PATH || null,
+    weekendPolicyEnabled: parseBool(e.DYNAMIC_UNIVERSE_WEEKEND_POLICY_ENABLED, false),
+    weekendOnly24x7: parseBool(e.DYNAMIC_UNIVERSE_WEEKEND_ONLY_24X7, true),
+    weekendExtraSymbols: parseCsv(e.DYNAMIC_UNIVERSE_WEEKEND_EXTRA_SYMBOLS || ''),
+    weekendKeepNon24x7InWatchlist: parseBool(
+      e.DYNAMIC_UNIVERSE_WEEKEND_KEEP_NON_24X7_IN_WATCHLIST,
+      false
+    ),
+    universeTimezone: e.DYNAMIC_UNIVERSE_TIMEZONE ? String(e.DYNAMIC_UNIVERSE_TIMEZONE).trim() : null,
     ...overrides,
   };
 }
@@ -121,6 +203,23 @@ function getDynamicUniverseCandidates(config = null) {
   for (const s of [...c.baseSymbols, ...c.extraSymbols]) {
     const n = normalizeSymbol(s);
     if (n) set.add(n);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * On weekend + policy: merge weekend-only extras (must exist in SYMBOL_METADATA).
+ */
+function getDynamicUniverseCandidatesForBuild(config, context = {}) {
+  const base = getDynamicUniverseCandidates(config);
+  const wp = weekendUniversePolicy.getWeekendPolicyConfig(config);
+  if (!wp.weekendPolicyEnabled) return base;
+  const now = context.now ? new Date(context.now) : new Date();
+  if (!weekendUniversePolicy.isWeekendForUniverse(now, config)) return base;
+  const set = new Set(base);
+  for (const s of wp.weekendExtraSymbols || []) {
+    const n = normalizeSymbol(s);
+    if (n && SYMBOL_METADATA[n]) set.add(n);
   }
   return [...set].sort((a, b) => a.localeCompare(b));
 }
@@ -272,7 +371,7 @@ function buildDynamicUniverse(context = {}) {
       ...(config.suspendedSymbols || []),
     ].map(normalizeSymbol);
 
-    const candidates = getDynamicUniverseCandidates(config);
+    const candidates = getDynamicUniverseCandidatesForBuild(config, context);
     const ctxBase = {
       config,
       explicitSuspended,
@@ -348,9 +447,23 @@ function buildDynamicUniverse(context = {}) {
 
     const maxA = config.maxActiveSymbols;
     const maxW = config.maxWatchlistSymbols;
+    const nowDate = context.now ? new Date(context.now) : new Date();
 
-    const activeSymbols = eligibleForRanking.slice(0, maxA).map((r) => r.symbol);
-    const watchlistSymbols = eligibleForRanking.slice(maxA, maxA + maxW).map((r) => r.symbol);
+    const wknd = weekendUniversePolicy.applyWeekendUniversePolicy(eligibleForRanking, {
+      config,
+      symbolMetadata: SYMBOL_METADATA,
+      now: nowDate,
+      maxActive: maxA,
+      maxWatchlist: maxW,
+    });
+
+    const activeSymbols = wknd.activeSymbols;
+    const watchlistSymbols = wknd.watchlistSymbols;
+
+    for (const [sym, rs] of Object.entries(wknd.reasonsPatch || {})) {
+      if (!reasonsBySymbol[sym]) reasonsBySymbol[sym] = [];
+      reasonsBySymbol[sym] = [...new Set([...(reasonsBySymbol[sym] || []), ...rs])];
+    }
 
     const picked = new Set([...activeSymbols, ...watchlistSymbols]);
     for (const row of eligibleForRanking) {
@@ -370,12 +483,17 @@ function buildDynamicUniverse(context = {}) {
         assetClass: row.assetClass,
         score: row.totalScore,
         decision,
-        reasons: row.reasons,
+        reasons: reasonsBySymbol[row.symbol] || row.reasons,
         components,
       };
     });
 
     const snapshotWarnings = [];
+    if (wknd.weekendPolicy && Array.isArray(wknd.weekendPolicy.warnings)) {
+      for (const w of wknd.weekendPolicy.warnings) {
+        snapshotWarnings.push(`weekend:${w}`);
+      }
+    }
     const droppedUnique = [...new Set(droppedSymbols)].sort((a, b) => a.localeCompare(b));
 
     const impactedSymbols = [];
@@ -426,6 +544,8 @@ function buildDynamicUniverse(context = {}) {
         newsSignals: macroPack.newsSignalsUsed || [],
       };
     }
+
+    result.weekendPolicy = wknd.weekendPolicy;
 
     if (config.writeSnapshot) {
       const w = writeDynamicUniverseSnapshot(result, config);
@@ -516,6 +636,11 @@ function sanitizeConfigForSnapshot(config) {
     newsEnabled: config.newsEnabled,
     calendarEnabled: config.calendarEnabled,
     macroWriteSnapshot: config.macroWriteSnapshot,
+    weekendPolicyEnabled: config.weekendPolicyEnabled,
+    weekendOnly24x7: config.weekendOnly24x7,
+    weekendExtraSymbols: config.weekendExtraSymbols,
+    weekendKeepNon24x7InWatchlist: config.weekendKeepNon24x7InWatchlist,
+    universeTimezone: config.universeTimezone,
   };
 }
 
@@ -679,6 +804,7 @@ module.exports = {
   parseCsv,
   getDynamicUniverseConfig,
   getDynamicUniverseCandidates,
+  getDynamicUniverseCandidatesForBuild,
   scoreUniverseCandidate,
   buildDynamicUniverse,
   writeDynamicUniverseSnapshot,

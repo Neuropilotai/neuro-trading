@@ -1,5 +1,11 @@
 # Dynamic Universe — Phase 2 (Macro / News / Calendar)
 
+## Weekend policy (symbol selection only)
+
+When `DYNAMIC_UNIVERSE_WEEKEND_POLICY_ENABLED=true` and `DYNAMIC_UNIVERSE_WEEKEND_ONLY_24X7=true`, **Saturday/Sunday** in `DYNAMIC_UNIVERSE_TIMEZONE` (or UTC if unset) restricts active/watchlist slots to symbols with `tradingSchedule: "24x7"` in metadata (typically crypto). Forex/metals/indices get `excluded_non_24x7_on_weekend` unless `DYNAMIC_UNIVERSE_WEEKEND_KEEP_NON_24X7_IN_WATCHLIST=true` (watchlist only).
+
+`DYNAMIC_UNIVERSE_WEEKEND_EXTRA_SYMBOLS` merges additional symbols **into the candidate pool on weekends only** if they exist in `SYMBOL_METADATA` (e.g. `ETHUSD`). Pricing must still be supported by `oandaPriceAdapter` / your broker.
+
 ## Architecture
 
 Three small services sit **above** phase-1 rule scoring and **below** the autonomous entry engine:

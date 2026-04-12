@@ -13,6 +13,8 @@ It is **not** a trading engine. It only answers: which symbols should be conside
 
 **Phase 2** adds optional macro / news / calendar boosts on top of the rule-based score. See [DYNAMIC_UNIVERSE_MACRO.md](./DYNAMIC_UNIVERSE_MACRO.md).
 
+**Weekend policy** (`backend/services/weekendUniversePolicy.js`): when enabled, Saturdays/Sundays (in `DYNAMIC_UNIVERSE_TIMEZONE` or UTC) can restrict **active/watchlist** to symbols whose metadata has `tradingSchedule: "24x7"` (crypto-style), so scans avoid dead forex/indices sessions. See env vars below.
+
 ## Outputs
 
 A successful build returns a machine-readable object including:
@@ -34,6 +36,7 @@ A successful build returns a machine-readable object including:
 | `macroContext` | Present when macro enabled: regime bias, confidence |
 | `providerStatus` | Calendar/news provider summary |
 | `inputs` | Echo of calendar events and news signals used (when macro on) |
+| `weekendPolicy` | Weekend filter summary (mode, filtered symbols, warnings) when policy is configured |
 
 ## Environment variables
 
@@ -51,6 +54,11 @@ A successful build returns a machine-readable object including:
 | `DYNAMIC_UNIVERSE_WRITE_SNAPSHOT` | `true` | Persist last build to disk |
 | `DYNAMIC_UNIVERSE_SNAPSHOT_PATH` | `dynamic_universe_latest.json` (under `DATA_DIR`) | Snapshot filename or absolute path |
 | `DYNAMIC_UNIVERSE_SUSPENDED_SYMBOLS` | _(empty)_ | Comma list forced to suspended |
+| `DYNAMIC_UNIVERSE_WEEKEND_POLICY_ENABLED` | `false` | Enable weekend Sat/Sun handling |
+| `DYNAMIC_UNIVERSE_WEEKEND_ONLY_24X7` | `true` | On weekend, only `tradingSchedule: 24x7` symbols for active/slots (if `false`, no weekend filter) |
+| `DYNAMIC_UNIVERSE_WEEKEND_EXTRA_SYMBOLS` | _(empty)_ | Extra symbols merged into candidates **on weekends only** (must be in metadata) |
+| `DYNAMIC_UNIVERSE_WEEKEND_KEEP_NON_24X7_IN_WATCHLIST` | `false` | Allow filling watchlist from non-24x7 after 24x7 slots |
+| `DYNAMIC_UNIVERSE_TIMEZONE` | _(empty → UTC)_ | IANA zone for weekend detection (e.g. `America/Toronto`) |
 
 Related (unchanged) symbols env for **legacy** resolution when `DYNAMIC_UNIVERSE_ENABLED` is false:
 
@@ -70,6 +78,7 @@ const u = require('./backend/services/dynamicUniverseManager');
 
 u.getDynamicUniverseConfig({ maxActiveSymbols: 4 });
 u.getDynamicUniverseCandidates();
+u.getDynamicUniverseCandidatesForBuild(config, context);
 u.scoreUniverseCandidate('XAUUSD', { config, allCandidatesSorted, explicitSuspended });
 u.buildDynamicUniverse({ config: { ... }, explicitSuspended: [] });
 u.writeDynamicUniverseSnapshot(result, config);
@@ -80,6 +89,10 @@ Legacy exports used by the autonomous entry engine:
 
 - `resolveAutonomousSymbolsSync()` — static file / env / **optional dynamic** universe
 - `DEFAULT_SYMBOL_CSV`, `parseCsv`, `universeFilePath`, `writeStubUniverseFileSync`
+
+## OANDA pricing for index symbols
+
+`NAS100USD` / `SPX500USD` map to OANDA instruments with **automatic fallbacks** (e.g. `US500_USD` then `SPX500_USD` for the S&P sleeve). If all codes fail, check that your OANDA account lists those CFDs in the API (instruments vary by jurisdiction).
 
 ## Testing
 
